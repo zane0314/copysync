@@ -99,12 +99,12 @@ INDEX_HTML = """<!doctype html>
     body { margin:0; background:var(--bg); color:#171c19; }
     button,input,textarea,select { font:inherit; }
     button,.button { border:0; border-radius:9px; padding:11px 18px; cursor:pointer; font-weight:650; background:var(--green); color:#fff; text-decoration:none; transition:all .15s ease; }
-    body:not(.mac-app) button:hover:not(:disabled),body:not(.mac-app) .button:hover { background:var(--green-dark); transform:translateY(-1px); box-shadow:0 4px 12px rgba(11,92,62,.28); }
-    body:not(.mac-app) button:active:not(:disabled),body:not(.mac-app) .button:active { background:var(--green-press); transform:translateY(1px); box-shadow:inset 0 2px 4px rgba(0,0,0,.2); }
+    button:hover:not(:disabled), .button:hover { background:var(--green-dark); transform:translateY(-1px); box-shadow:0 4px 12px rgba(11,92,62,.28); }
+    button:active:not(:disabled), .button:active { background:var(--green-press); transform:translateY(1px); box-shadow:inset 0 2px 4px rgba(0,0,0,.2); }
     button.secondary,.button.secondary { background:#fff; color:var(--green); border:1px solid #a9b9af; }
-    body:not(.mac-app) button.secondary:hover:not(:disabled),body:not(.mac-app) .button.secondary:hover { background:#f0f7f2; box-shadow:0 4px 12px rgba(11,92,62,.12); }
+    button.secondary:hover:not(:disabled), .button.secondary:hover { background:#f0f7f2; box-shadow:0 4px 12px rgba(11,92,62,.12); }
     button.ghost { background:transparent; color:#4e5752; padding:7px 9px; font-weight:400; }
-    body:not(.mac-app) button.ghost:hover:not(:disabled) { background:#f0f4f1; color:var(--green); box-shadow:none; }
+    button.ghost:hover:not(:disabled) { background:#f0f4f1; color:var(--green); box-shadow:none; }
     button:disabled { opacity:.55; cursor:not-allowed; }
     .hidden,[hidden] { display:none!important; }
     .muted { color:var(--muted); font-size:14px; }
@@ -131,7 +131,7 @@ INDEX_HTML = """<!doctype html>
     .search:focus { border-color:#bcd4c6; box-shadow:0 0 0 3px rgba(11,92,62,.08); }
     .filters { display:flex; gap:10px; margin-bottom:14px; overflow:auto; }
     .chip { background:#fff; color:#5a625d; border:1px solid var(--line); border-radius:999px; min-width:74px; padding:8px 16px; font-weight:400; transition:all .15s ease; }
-    body:not(.mac-app) .chip:hover:not(.active):not(:disabled) { color:var(--green); border-color:#cfdcd3; background:#fff; transform:translateY(-1px); box-shadow:0 3px 8px rgba(60,50,35,.06); }
+    .chip:hover:not(.active):not(:disabled) { color:var(--green); border-color:#cfdcd3; background:#fff; transform:translateY(-1px); box-shadow:0 3px 8px rgba(60,50,35,.06); }
     .chip.active { background:var(--green); color:#fff; border-color:var(--green); }
     .file-list { border:1px solid #f0ebe3; border-radius:12px; overflow:hidden; background:#fff; }
     .file-row { display:grid; grid-template-columns:26px minmax(0,1fr) auto; align-items:center; gap:12px; min-height:84px; padding:12px 14px; border-bottom:1px solid #f3efe8; }
@@ -149,8 +149,8 @@ INDEX_HTML = """<!doctype html>
     .file-preview { white-space:nowrap; text-overflow:ellipsis; overflow:hidden; color:#39433d; margin-bottom:4px; }
     .row-actions { display:flex; align-items:center; gap:3px; white-space:nowrap; }
     .row-actions .act { background:none; border:0; font-size:13px; font-weight:400; color:#5c665f; padding:6px 8px; border-radius:6px; cursor:pointer; text-decoration:none; transition:all .15s ease; }
-    body:not(.mac-app) .row-actions .act:hover { color:var(--green); background:#f0f7f2; transform:translateY(-1px); box-shadow:none; }
-    body:not(.mac-app) .row-actions .act:active { transform:translateY(1px); }
+    .row-actions .act:hover { color:var(--green); background:#f0f7f2; transform:translateY(-1px); box-shadow:none; }
+    .row-actions .act:active { transform:translateY(1px); }
     .empty { text-align:center; padding:45px 12px; color:var(--muted); }
     .transfer { position:sticky; top:94px; padding:20px; }
     .field-label { display:block; margin:18px 0 8px; color:#58615c; font-size:13px; font-weight:700; }
@@ -242,34 +242,26 @@ INDEX_HTML = """<!doctype html>
     .android-inbox .myfiles-box .transfer-row:last-child { border-bottom:0; }
     .android-inbox .myfiles-box > p.muted { padding:12px; margin:0; }
     .android-page-title { font-size:26px; font-weight:800; color:var(--green); letter-spacing:-.8px; margin:2px 0 4px; }
-    body.mac-app { min-height:100vh; color-scheme:dark; background:#171a18; color:#f4f7f5; --green:#70e59b; --line:rgba(255,255,255,.13); --muted:#9da7a1; }
+    body.mac-app { min-height:100vh; background:var(--bg); color:#22271f; }
     body.mac-app .header { display:none; }
-    body.mac-app main { max-width:none; min-height:100vh; padding:28px 30px 36px; background:#171a18; }
-    .mac-home { min-height:calc(100vh - 64px); }
-    .mac-title-row { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:24px; }
-    .mac-title-row h1 { color:#f7f9f8; font-size:26px; margin-bottom:7px; }
-    .mac-online { display:flex; align-items:center; gap:9px; color:#aeb7b1; font-size:13px; }
-    .mac-open-web { background:rgba(26,132,77,.18); color:#87eda9; border:1px solid rgba(93,221,139,.42); padding:10px 15px; font-size:14px; }
-    .mac-sendbar { display:grid; grid-template-columns:minmax(210px,1.5fr) repeat(3,minmax(112px,.8fr)); gap:10px; margin-bottom:24px; }
-    .mac-sendbar select,.mac-action { min-height:52px; border:1px solid rgba(255,255,255,.14); border-radius:11px; background:rgba(255,255,255,.055); color:#eef2ef; font-size:14px; }
+    body.mac-app main { max-width:none; min-height:100vh; padding:26px 28px 34px; }
+    .mac-home { min-height:calc(100vh - 60px); }
+    .mac-title-row { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:20px; }
+    .mac-title-row h1 { color:#162019; font-size:24px; margin-bottom:6px; }
+    .mac-online { display:flex; align-items:center; gap:9px; color:#5c665f; font-size:13px; }
+    .mac-upload { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+    body.mac-app .drop-hint { display:flex; align-items:center; flex:1; }
+    body.mac-app .mac-upload .button { width:auto; flex:0 0 auto; }
+    .mac-sendbar { display:grid; grid-template-columns:minmax(210px,1.4fr) repeat(3,minmax(112px,1fr)); gap:10px; margin-bottom:20px; }
+    .mac-sendbar select,.mac-action { min-height:48px; border:1px solid var(--line); border-radius:11px; background:#fff; color:#3c453f; font-size:14px; box-shadow:var(--card-shadow); transition:all .15s ease; }
     .mac-sendbar select { padding:0 14px; }
-    .mac-action { display:grid; place-items:center; padding:0 12px; cursor:pointer; font-weight:650; text-align:center; }
-    button.mac-action { color:#eef2ef; }
-    .mac-action:hover,.mac-sendbar select:hover { background:rgba(255,255,255,.09); }
-    .mac-section-title { color:#f5f8f6; font-size:20px; margin-bottom:12px; }
-    .mac-recents { border:1px solid rgba(255,255,255,.14); border-radius:13px; overflow:hidden; background:rgba(255,255,255,.035); }
-    .mac-recents .transfer-row { min-height:92px; padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.11); align-items:center; }
-    .mac-recents .transfer-row[data-receive] { cursor:pointer; }
-    .mac-recents .transfer-row:last-child { border-bottom:0; }
-    .mac-transfer-main { display:grid; grid-template-columns:58px minmax(0,1fr); gap:14px; align-items:center; }
-    .mac-transfer-icon { width:58px; height:58px; border-radius:11px; display:grid; place-items:center; background:rgba(91,214,135,.12); border:1px solid rgba(91,214,135,.28); color:#8ee9ae; font-size:27px; overflow:hidden; }
-    .mac-transfer-icon img { width:100%; height:100%; object-fit:cover; }
-    .mac-transfer-name { font-size:16px; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .mac-transfer-main .muted { font-size:13px; }
-    .mac-status-wrap { display:flex; align-items:center; gap:14px; }
-    .mac-status-wrap .status { color:#6de593; }
-    .mac-status-wrap .waiting { color:#efbd4e; }
-    .mac-file-msg { min-height:22px; margin:-14px 0 16px; }
+    .mac-action { display:flex; align-items:center; justify-content:center; gap:8px; padding:0 12px; cursor:pointer; font-weight:600; text-align:center; }
+    button.mac-action { color:#3c453f; }
+    .mac-action svg { width:18px; height:18px; color:var(--green); }
+    .mac-action:active { transform:translateY(1px); background:#f0f7f2; box-shadow:none; }
+    .mac-section-title { color:#162019; font-size:17px; margin:16px 0 10px; }
+    .mac-myfiles .myfile-row[data-receive] { cursor:pointer; }
+    .mac-file-msg { min-height:22px; margin:-10px 0 14px; }
     @media (max-width:900px) {
       .nav { padding:0 14px; gap:14px; }
       .health { display:none; }
@@ -419,7 +411,7 @@ async function renderApp() {
   searchInput.oninput = renderItems;
   filters.onclick = e => { const chip = e.target.closest('.chip'); if (!chip) return; filters.querySelectorAll('.chip').forEach(x => x.classList.remove('active')); chip.classList.add('active'); renderItems(); };
   bindDrop(dropZone, files => uploadDriveFiles(files));
-  bindDrop(IS_MAC_APP ? transferPanel : transferDrop, async files => {
+  bindDrop(IS_MAC_APP ? macInbox : transferDrop, async files => {
     selectTransferFiles(files);
     if (IS_MAC_APP) await sendTransfer();
   });
@@ -430,16 +422,26 @@ async function renderApp() {
   itemEvents.addEventListener('items', () => Promise.all([loadItems(), loadTransfers(), loadDevices(), loadUsage()]));
 }
 function macAppHtml() {
-  return `<section class="mac-home" id="transferPanel">
-    <div class="mac-title-row"><div><h1>跨设备收件箱</h1><div class="mac-online"><span class="dot"></span><span id="macOnlineCount">设备连接中</span></div></div><button class="mac-open-web" onclick="window.webkit?.messageHandlers?.copySync?.postMessage({type:'openWeb'})">↗ 打开网页版</button></div>
-    <div class="mac-sendbar"><select id="targetDevice" aria-label="发送目标"><option value="all">发送到：所有设备</option></select><button class="mac-action" id="pasteText">▣&nbsp; 粘贴文本</button><label class="mac-action" for="transferFiles">▱&nbsp; 选文件</label><label class="mac-action" for="transferImages">▧&nbsp; 选照片</label></div>
+  return `<section class="mac-home" id="macInbox">
+    <div class="mac-title-row"><div><h1>收件箱</h1><div class="mac-online"><span class="dot"></span><span id="macOnlineCount">设备连接中</span></div></div></div>
+    <div class="mac-upload"><span class="drop-hint" id="dropZone">⬇ 拖文件到这里上传</span><label class="button" for="driveFiles">上传</label></div>
+    <div class="mac-sendbar"><select id="targetDevice" aria-label="发送目标"></select><button class="mac-action" id="pasteText">${androidIcon('text')}粘贴文本</button><label class="mac-action" for="transferFiles">${androidIcon('file')}选文件</label><label class="mac-action" for="transferImages">${androidIcon('image')}选照片</label></div>
     <p class="muted mac-file-msg" id="fileMsg"></p>
-    <h2 class="mac-section-title">最近传输</h2><div class="mac-recents" id="recentTransfers"><p class="muted empty">暂无传输</p></div>
-    <div class="hidden" id="transferDrop"><textarea id="smartInput"></textarea></div><div class="selected-file hidden" id="selectedFile">📎 <span></span></div><label class="hidden"><input id="syncWeb" type="checkbox" checked></label><select class="hidden" id="transferTtl"><option value="604800">7 天</option></select><button class="hidden" id="uploadBtn">发送</button>
+    <h2 class="mac-section-title">我的文件</h2><div class="mac-myfiles myfiles-box" id="macMyFiles"><p class="muted">暂无内容</p></div>
+    <div class="hidden" id="transferDrop"><textarea id="smartInput"></textarea></div><div class="selected-file hidden" id="selectedFile">📎 <span></span></div><input class="hidden" id="syncWeb" type="checkbox" checked aria-hidden="true" tabindex="-1"><select class="hidden" id="transferTtl"><option value="86400" selected>1 天</option></select><button class="hidden" id="uploadBtn">发送</button>
     <input class="hidden" id="transferFiles" type="file" multiple><input class="hidden" id="transferImages" type="file" accept="image/*" multiple><input class="hidden" id="driveFiles" type="file" multiple>
-    <div class="hidden" id="dropZone"><input id="searchInput"><div id="filters"><button class="chip active" data-kind=""></button></div><div id="items"></div></div><span class="hidden" id="capacity"></span><button class="hidden" id="refreshBtn"></button><button class="hidden" id="clearAll"></button><span class="hidden" id="clearMsg"></span>
-  </section>`;
+  </section>
+  <section class="mac-home hidden" id="macRecords"><div class="mac-title-row"><div><h1>传输历史</h1><div class="mac-online">完整记录 · 保留 30 天</div></div></div><div class="myfiles-box" id="macRecordsList"><p class="muted">暂无记录</p></div></section>
+  <section class="mac-home hidden" id="macDrive"><div class="mac-title-row"><div><h1>临时网盘</h1><div class="mac-online"><span id="capacity">正在计算空间…</span> · 默认保存 7 天</div></div></div><input class="search" id="searchInput" placeholder="搜索文本、文件和图片"><div class="filters" id="filters"><button class="chip active" data-kind="">全部</button><button class="chip" data-kind="text">文本</button><button class="chip" data-kind="file">文件</button><button class="chip" data-kind="image">图片</button><button class="chip" data-kind="pinned">已固定</button></div><div class="file-list" id="items"><div class="empty">正在载入…</div></div><div class="top" style="margin-top:12px"><span class="muted" id="clearMsg"></span><div><button class="ghost" id="refreshBtn">刷新</button><button class="ghost" id="clearAll">清理临时内容</button></div></div></section>`;
 }
+function showMacSection(section) {
+  if (!IS_MAC_APP) return;
+  macInbox.classList.toggle('hidden', section !== 'inbox');
+  macRecords.classList.toggle('hidden', section !== 'records');
+  macDrive.classList.toggle('hidden', section !== 'drive');
+  scrollTo({top:0});
+}
+window.showMacSection = showMacSection;
 function androidIcon(kind) {
   const paths = {
     laptop:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
@@ -508,7 +510,7 @@ async function loadDevices() {
   const data = await api('/api/devices', {cache:'no-store'});
   const previous = targetDevice.value;
   data.devices.forEach(d => deviceNames[d.id] = d.name);
-  targetDevice.innerHTML = (IS_MAC_APP ? `<option value="all">发送到：全部设备</option>` : '') + data.devices.filter(d => d.id !== 'web' && d.id !== 'windows' && d.id !== CURRENT_DEVICE).map(d => `<option value="${d.id}">${IS_ANDROID_APP || IS_MAC_APP ? '发送到：' : ''}${escapeHtml(d.name)}${d.online ? ' · 在线' : ' · 离线'}</option>`).join('');
+  targetDevice.innerHTML = data.devices.filter(d => d.id !== 'web' && d.id !== 'windows' && d.id !== CURRENT_DEVICE).map(d => `<option value="${d.id}">${IS_ANDROID_APP || IS_MAC_APP ? '发送到：' : ''}${escapeHtml(d.name)}${d.online ? ' · 在线' : ' · 离线'}</option>`).join('');
   const values = [...targetDevice.options].map(o => o.value);
   const fallback = IS_ANDROID_APP ? 'mac' : 'android';
   targetDevice.value = previous && values.includes(previous) ? previous : (values.includes(fallback) ? fallback : values[0]);
@@ -595,7 +597,32 @@ async function loadTransfers() {
     androidInboxList.querySelectorAll('[data-tcopy]').forEach(b => b.onclick = e => { e.stopPropagation(); const t = latestTransfers.find(x => x.item_id === b.dataset.tcopy); if (t) copyToSystemClipboard(t.text || '').then(() => showGlassToast('文本已复制')); });
     androidInboxList.querySelectorAll('[data-dl]').forEach(b => b.onclick = e => { e.stopPropagation(); receiveTransfer(b.dataset.dl); });
   } else if (IS_MAC_APP) {
-    recentTransfers.innerHTML = relevant.length ? relevant.slice(0,6).map(t => { const image=t.mime?.startsWith('image/'); const icon=image ? `<img src="/download/${t.item_id}?inline=1" alt="">` : t.kind==='text' ? '↗' : '▰'; const incoming=t.target_device===CURRENT_DEVICE; const action=incoming&&t.status==='waiting'?(t.kind==='text'?'点按复制':'点按接收'):(labels[t.status]||t.status); return `<div class="transfer-row" role="button" tabindex="0" data-receive="${t.id}"><div class="mac-transfer-main"><div class="mac-transfer-icon">${icon}</div><div><div class="mac-transfer-name">${escapeHtml(t.kind==='text' ? (t.text || '文本').slice(0,42) : t.name || '文件')}</div><div class="muted">${escapeHtml(deviceNames[t.source_device] || t.source_device)} → ${escapeHtml(deviceNames[t.target_device] || t.target_device)}</div></div></div><div class="mac-status-wrap"><span class="status ${t.status}">${action}</span><span>›</span></div></div>`; }).join('') : '<p class="muted empty">暂无传输</p>';
+    const seenMacItems = new Set();
+    const macFilesList = [];
+    for (const t of relevant) {
+      if (seenMacItems.has(t.item_id)) continue;
+      seenMacItems.add(t.item_id);
+      macFilesList.push(t);
+    }
+    macMyFiles.innerHTML = macFilesList.length ? macFilesList.slice(0,8).map(t => {
+      const image = t.mime?.startsWith('image/');
+      const icon = image ? `<img src="/download/${t.item_id}?inline=1" alt="">` : androidIcon(t.kind === 'text' ? 'note' : 'file');
+      const incoming = t.target_device === CURRENT_DEVICE;
+      const dir = incoming ? `来自 ${escapeHtml(deviceNames[t.source_device] || t.source_device)}` : `发至 ${escapeHtml(deviceNames[t.target_device] || t.target_device)}`;
+      const second = t.kind === 'text' ? `<button class="act" data-tcopy="${t.item_id}">复制</button>` : `<button class="act" data-dl="${t.id}">下载</button>`;
+      return `<div class="myfile-row" role="button" tabindex="0" data-receive="${t.id}"><div class="mthumb">${icon}</div><div class="myfile-copy"><div class="file-name">${escapeHtml(t.kind === 'text' ? (t.text || '文本').slice(0,42) : t.name || '文件')}</div><div class="muted">${dir} · ${fmtRemain(t.expires_at)}</div></div><div class="row-actions"><button class="act" data-keep="${t.item_id}">上传</button>${second}</div></div>`;
+    }).join('') : '<p class="muted">暂无内容</p>';
+    const macLiveRows = relevant.map(t => ({...t, expired: false}));
+    const macHistoryRows = (data.history || []).filter(h => h.source_device === CURRENT_DEVICE || h.target_device === CURRENT_DEVICE).map(h => ({...h, expired: true}));
+    const macRecordsMerged = [...macLiveRows, ...macHistoryRows].sort((a, b) => b.created_at - a.created_at).slice(0,12);
+    macRecordsList.innerHTML = macRecordsMerged.length ? macRecordsMerged.map(t => {
+      const name = t.kind === 'text' ? (t.text || '文本').slice(0,32) : t.name || '文件';
+      const status = t.expired ? '<span class="status expired">已过期 · 文件已删</span>' : `<span class="status ${t.status}">${labels[t.status] || t.status}</span>`;
+      return `<div class="transfer-row ${t.expired ? 'expired' : ''}"><div><strong>${escapeHtml(name)}</strong><div class="muted">${escapeHtml(deviceNames[t.source_device] || t.source_device)} → ${escapeHtml(deviceNames[t.target_device] || t.target_device)}</div></div>${status}</div>`;
+    }).join('') : '<p class="muted">暂无记录</p>';
+    macMyFiles.querySelectorAll('[data-keep]').forEach(b => b.onclick = e => { e.stopPropagation(); keepItem(b.dataset.keep); });
+    macMyFiles.querySelectorAll('[data-tcopy]').forEach(b => b.onclick = e => { e.stopPropagation(); const t = latestTransfers.find(x => x.item_id === b.dataset.tcopy); if (t) copyToSystemClipboard(t.text || '').then(() => showGlassToast('文本已复制')); });
+    macMyFiles.querySelectorAll('[data-dl]').forEach(b => b.onclick = e => { e.stopPropagation(); receiveTransfer(b.dataset.dl); });
   } else {
     const seenItems = new Set();
     const myFilesList = [];
@@ -627,9 +654,9 @@ async function loadTransfers() {
     row.onclick = () => { if (row.dataset.suppressClick === '1') return; receiveTransfer(row.dataset.receive); };
     row.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); receiveTransfer(row.dataset.receive); } };
   });
-  if (IS_ANDROID_APP || IS_MAC_APP) {
-    const container = IS_ANDROID_APP ? androidInboxList : recentTransfers;
-    const shown = IS_ANDROID_APP ? androidInboxShown : relevant.slice(0,6);
+  if (IS_ANDROID_APP) {
+    const container = androidInboxList;
+    const shown = androidInboxShown;
     container.querySelectorAll('.transfer-row').forEach((row, index) => {
       const transfer = shown[index];
       if (!transfer || transfer.kind === 'text') return;

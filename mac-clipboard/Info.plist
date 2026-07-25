@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key><string>CopySync</string>
+  <key>CFBundleExecutable</key><string>CopySync</string>
+  <key>CFBundleIdentifier</key><string>com.example.copysync</string>
+  <key>CFBundleName</key><string>CopySync</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleShortVersionString</key><string>2.1</string>
+  <key>CFBundleVersion</key><string>34</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSAccessibilityUsageDescription</key><string>用于在其他应用按下 Command-V 时粘贴网站中的最新内容。</string>
+  <key>NSInputMonitoringUsageDescription</key><string>用于点击本地历史后在当前应用自动执行 Command-V 粘贴。</string>
+  <key>NSScreenCaptureUsageDescription</key><string>用于框选屏幕区域并将截图保存到 CopySync 本地历史。</string>
+</dict>
+</plist>
