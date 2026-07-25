@@ -1,0 +1,96 @@
+# CopySync 网页版 UI 重设计（方案 B 暖白卡片 · V3）设计文档
+
+日期：2026-07-25
+状态：已与用户确认（头脑风暴 + 可视化预览 V1→V3，用户批准 V3）
+
+## 一、需求提炼
+
+### 背景
+CopySync 网页前端是内嵌在 `app.py` 中 `INDEX_HTML` 的单文件 SPA，一套代码三种模式：
+浏览器网页版（浅色）、安卓 App WebView（`?app=android`，浅色）、Mac App WebView（`?app=mac`，深色）。
+本次只重做**浏览器网页版**的视觉，用户要求：功能不变、简约大气、白色为主。
+
+### 选定方向
+方案 B「暖白卡片」（Notion / Things 风），并按用户截图标注做了 V3 修改：
+
+1. **视觉语言**：米白底 `#faf9f7` + 白色悬浮卡片
+   （1px `#eee9e2` 边框、14px 圆角、柔和阴影）+ 低饱和墨绿 `#0b5c3e` 点缀
+   （Logo、主按钮、选中 chip、已接收状态、钉住图标）。整体白色为主、简约大气。
+2. **删除顶栏「临时网盘 / 设备传输」两个标签**（原本就是无功能的纯装饰 span，
+   删除不影响任何功能）。顶栏只保留：Logo、设备在线状态、用户头像。
+3. **删除左侧网盘面板的「临时网盘」标题**，保留「12 项 · 86 MB」容量小字。
+4. **网盘面板头部新增拖放上传框**：位于「上传」按钮左侧，虚线边框
+   「⬇ 拖文件到这里上传」。复用现有拖拽上传能力（现有 `.drop-hint` 逻辑），
+   只是把它从一条提示改造成头部明确的框；不新增后端行为。
+5. **右侧「设备传输」面板功能与结构完全不变**，仅套用新视觉（卡片、配色）。
+6. 登录页、入口选择页（/go）同步换新视觉语言（白卡片 + 墨绿主按钮）。
+
+### 明确不做（YAGNI）
+- 不改任何 API、JS 逻辑、事件处理、SSE 推送、上传/下载/钉住/复制/删除行为
+- 不改 Python 后端一行代码
+- 本阶段不改安卓 App 视图（`body.android-app`）和 Mac App 视图（`body.mac-app`）的专属样式
+- 不调整信息架构（左右双栏布局保持）
+
+## 二、阶段目标
+
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| P1（本次） | 网页版 UI 换新：方案 B · V3 | 本次实施 |
+| P2（后续） | 安卓 App WebView 界面统一为新语言 | 另起任务 |
+| P3（后续） | Mac App WebView 界面统一（当前深色，是否转白需再确认） | 另起任务 |
+
+### P1 实施要点
+- 改动范围仅 `app.py` 的 `INDEX_HTML` 字符串内：`<style>` 默认（网页）样式 + 少量静态
+  HTML（顶栏 nav、drive-head 结构）。
+- CSS 变量更新：`--green:#075c3c` → `#0b5c3e`（视觉一致的新墨绿），背景 `#fbfaf8` → `#faf9f7`，
+  边框色 `--line` → `#eee9e2` 系。
+- 顶栏：删除 `.navlinks` 两个 span（保留容器样式清理）。
+- drive-head：标题 `<h1>临时网盘</h1>` 移除；`.drop-hint` 改造成上传框（flex:1 虚线框），
+  置于「上传」按钮左侧；其拖拽高亮态 `.active` 行为保留。
+- 卡片化：`.panel` / 网盘列表容器套用白卡 + 阴影 + 14px 圆角。
+- 响应式 `@media 900px / 520px` 规则同步核对（移动端 drive-head 换行、drop-hint 原已隐藏的逻辑保留）。
+- **风险点**：`.panel`、`button`、`.chip` 等类同时被 android-app 模式引用。改默认样式后
+  必须核对 `?app=android` 与 `?app=mac` 视图不破版；必要时将新样式限定在默认（网页）作用域，
+  或保持共享类的改动对 App 视图同样成立（App 视图多为自身 override，默认样式的颜色变量改动
+  会渗透到 android 视图——可接受，因 android 同为白色系且 P2 会统一；mac 视图自定义了
+  `--green` 等变量，不受影响）。
+
+## 三、验收准备
+
+### 本地验证（改完先跑）
+1. `python3 test_app.py`（现有 17 项服务端测试）全部通过。
+2. 本地启动 app，浏览器核对四种页面：登录页、/go 入口页、网页主界面、`?app=android`、
+   `?app=mac`（确认后两者不破版）。
+3. 主界面功能点：登录、上传（按钮 + 拖入新上传框 + 拖入列表区域）、搜索、筛选 chips、
+   复制、下载、钉住/取消钉住、单条删除、全部删除、设备传输发送（文本/文件）、
+   保留时间选项、同步到网页勾选、最近传输状态展示。
+4. 响应式：缩窗口到 <900px 与 <520px 核对布局。
+
+### 线上验收（部署到示例 VPS 后）
+1. 部署前备份：`/opt/copy-example/app.py` → 带时间戳备份。
+2. 重启 `copy-example.service`，确认 active、`NRestarts` 不增长、日志无异常。
+3. 三入口 HTTP 200：`copy.example.com` / `copy-direct.example.com` / `copy-cf.example.com`，
+   两个 healthz 200。
+4. 线上登录走一遍：上传（含拖放框）、下载、删除、发送传输各一次，测试数据清理。
+5. Mac / Android 真机 App 打开确认 WebView 界面正常（不破版、能发能收）。
+6. 视觉效果与 V3 mockup 一致（白为主、墨绿点缀、卡片阴影、无导航标签、有拖放框）。
+
+### 回滚
+恢复部署前的 `app.py` 备份并重启服务即可，无数据库/配置变更。
+
+## 四、约束
+
+1. **功能不变**：所有接口、JS 行为、原生 App 桥（`window.CopySyncNative`）零改动。
+2. **单文件约束**：前端仍内嵌 `INDEX_HTML`，不引入构建工具、不拆文件、不加依赖。
+3. **后端零改动**：只动 `INDEX_HTML` 字符串；Python 代码一行不改。
+4. **不影响 App 端**：`?app=android`、`?app=mac` 两个 WebView 不许破版；
+   `body.android-app` / `body.mac-app` 专属样式块不删不改（共享变量微调可渗透 android，mac 有自有变量覆盖）。
+5. **兼容既有部署**：端口 15080、systemd 单元、nginx、Cookie 策略、限速全部不动。
+6. **交接更新**：上线后更新 VPS 交接 txt 的 CopySync 段（版本描述、验收结果），
+   遵循 vps-inventory-handoff-manager 规范。
+
+## 五、参考
+
+- 定稿 mockup：`.superpowers/brainstorm/92417-1784970466/content/web-ui-scheme-b-v3.html`
+- 过程稿：同目录 `web-ui-directions.html`（V1 三方案）、`web-ui-directions-v2.html`（V2 排版）
+- 用户标注截图：`~/Desktop/1dbd7b6d-56d2-4e47-aee6-845cd8c911de.png`
