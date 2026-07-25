@@ -1,0 +1,5 @@
+.env
+data/
+__pycache__/
+*.pyc
+mac-clipboard/signing/

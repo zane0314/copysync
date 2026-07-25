@@ -235,14 +235,13 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
     NSButton *inbox = [CopySyncSidebarButton buttonWithTitle:@"收件箱" target:self action:@selector(showMacInbox:)];
     NSButton *records = [CopySyncSidebarButton buttonWithTitle:@"传输历史" target:self action:@selector(showMacRecords:)];
     NSButton *drive = [CopySyncSidebarButton buttonWithTitle:@"临时网盘" target:self action:@selector(showMacDrive:)];
-    NSButton *devices = [CopySyncSidebarButton buttonWithTitle:@"设备" target:self action:@selector(showDevicesInWeb:)];
     NSButton *openWeb = [CopySyncSidebarButton buttonWithTitle:@"打开网页版" target:self action:@selector(openWebVersion:)];
     NSButton *settings = [CopySyncSidebarButton buttonWithTitle:@"设置" target:self action:@selector(showPreferences:)];
-    NSArray *symbols = @[@"tray.and.arrow.down", @"clock", @"icloud", @"iphone", @"arrow.up.right", @"gearshape"];
+    NSArray *symbols = @[@"tray.and.arrow.down", @"clock", @"icloud", @"arrow.up.right", @"gearshape"];
     NSImageSymbolConfiguration *symbolStyle = [NSImageSymbolConfiguration configurationWithPointSize:15 weight:NSFontWeightRegular];
     NSUInteger symbolIndex = 0;
     self.sidebarButtons = [NSMutableArray new];
-    for (NSButton *button in @[inbox, records, drive, devices, openWeb, settings]) {
+    for (NSButton *button in @[inbox, records, drive, openWeb, settings]) {
         button.bordered = NO;
         button.alignment = NSTextAlignmentLeft;
         button.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
@@ -256,7 +255,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
         [self.sidebarButtons addObject:button];
     }
     NSView *spacer = [NSView new];
-    NSStackView *stack = [NSStackView stackViewWithViews:@[inbox, records, drive, devices, openWeb, spacer, settings]];
+    NSStackView *stack = [NSStackView stackViewWithViews:@[inbox, records, drive, openWeb, spacer, settings]];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
     stack.alignment = NSLayoutAttributeLeading;
     stack.spacing = 4;
@@ -267,7 +266,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
         [stack.leadingAnchor constraintEqualToAnchor:sidebar.leadingAnchor constant:14], [stack.trailingAnchor constraintEqualToAnchor:sidebar.trailingAnchor constant:-14],
         [stack.topAnchor constraintEqualToAnchor:sidebar.topAnchor constant:16], [stack.bottomAnchor constraintEqualToAnchor:sidebar.bottomAnchor constant:-16],
         [inbox.widthAnchor constraintEqualToAnchor:stack.widthAnchor], [records.widthAnchor constraintEqualToAnchor:stack.widthAnchor],
-        [drive.widthAnchor constraintEqualToAnchor:stack.widthAnchor], [devices.widthAnchor constraintEqualToAnchor:stack.widthAnchor],
+        [drive.widthAnchor constraintEqualToAnchor:stack.widthAnchor],
         [openWeb.widthAnchor constraintEqualToAnchor:stack.widthAnchor], [settings.widthAnchor constraintEqualToAnchor:stack.widthAnchor]
     ]];
     [spacer setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationVertical];
@@ -298,11 +297,6 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
 - (void)showMacDrive:(id)sender { [self selectMacSection:@"drive"]; }
 - (void)openWebVersion:(id)sender {
     [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"https://copy-direct.example.com/"]];
-}
-
-- (void)showDevicesInWeb:(id)sender {
-    [self openWindow:nil];
-    [self.webView evaluateJavaScript:@"document.querySelector('.transfer')?.scrollIntoView({behavior:'smooth',block:'start'})" completionHandler:nil];
 }
 
 - (NSURL *)cacheRootURL {
@@ -617,7 +611,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
     self.historyPanel.releasedWhenClosed = NO;
     self.historyPanel.delegate = self;
     self.historyPanel.minSize = NSMakeSize(240, 150);
-    self.historyPanel.maxSize = NSMakeSize(620, 700);
+    self.historyPanel.maxSize = NSMakeSize(620, 1200);
     BOOL restoredFrame = [self.historyPanel setFrameUsingName:@"CopySyncHistoryPanel"];
     [self.historyPanel setFrameAutosaveName:@"CopySyncHistoryPanel"];
     if (!restoredFrame) [self.historyPanel center];
@@ -651,6 +645,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
     self.historyScroll = scroll;
     scroll.drawsBackground = NO;
     scroll.hasVerticalScroller = YES;
+    scroll.autohidesScrollers = YES;
     scroll.documentView = self.historyStack;
     NSStackView *root = [NSStackView stackViewWithViews:@[header, scroll]];
     root.orientation = NSUserInterfaceLayoutOrientationVertical;
@@ -791,15 +786,21 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
 }
 
 - (void)updateHistoryDocumentFrame {
-    CGFloat height = self.historyStack.edgeInsets.top + self.historyStack.edgeInsets.bottom;
-    NSUInteger count = self.historyStack.arrangedSubviews.count;
-    for (NSView *view in self.historyStack.arrangedSubviews) height += MAX(view.fittingSize.height, 24);
-    if (count > 1) height += self.historyStack.spacing * (count - 1);
     NSRect frame = self.historyStack.frame;
     frame.origin = NSZeroPoint;
     frame.size.width = MAX(self.historyScroll.contentSize.width, 200);
+    self.historyStack.frame = frame;
+    [self.historyStack layoutSubtreeIfNeeded];
+    CGFloat height = self.historyStack.edgeInsets.top + self.historyStack.edgeInsets.bottom;
+    NSUInteger count = self.historyStack.arrangedSubviews.count;
+    for (NSView *view in self.historyStack.arrangedSubviews) height += MAX(MAX(view.frame.size.height, view.fittingSize.height), 24);
+    if (count > 1) height += self.historyStack.spacing * (count - 1);
     frame.size.height = MAX(height, self.historyScroll.contentSize.height);
     self.historyStack.frame = frame;
+}
+
+- (void)windowDidResize:(NSNotification *)notification {
+    if (notification.object == self.historyPanel) [self updateHistoryDocumentFrame];
 }
 
 - (void)showHistoryPanel:(id)sender {
@@ -901,10 +902,15 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
     BOOL granted = CGRequestScreenCaptureAccess();
     if (granted) {
         [self setStatusOK:YES message:@"屏幕录制权限已开启，请再次使用 ⌘J"];
-    } else {
-        [self setStatusOK:NO message:@"请在系统设置中允许 CopySync 屏幕录制，然后重新打开应用"];
-        [self openPrivacyPane:@"Privacy_ScreenCapture"];
+        return;
     }
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @"需要屏幕录制权限才能截图";
+    alert.informativeText = @"如果「屏幕录制」列表里已有 CopySync 但勾选后仍无效（多见于更新后旧授权失效），请选中 CopySync 点「−」删除，再点「＋」重新添加本应用并勾选，然后重启 CopySync。";
+    [alert addButtonWithTitle:@"打开系统设置"];
+    [alert addButtonWithTitle:@"取消"];
+    if ([alert runModal] == NSAlertFirstButtonReturn) [self openPrivacyPane:@"Privacy_ScreenCapture"];
+    [self setStatusOK:NO message:@"允许屏幕录制并重启 CopySync 后即可截图"];
 }
 
 - (void)requestPastePermission:(id)sender {
@@ -1450,9 +1456,31 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
             self.pasteboardChangeCount = pasteboard.changeCount;
             if (!copied) [self setStatusOK:NO message:@"复制下载链接失败"];
         });
+    } else if ([type isEqual:@"readClipboard"]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *text = [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString];
+            NSString *argument = @"null";
+            if (text) {
+                NSData *json = [NSJSONSerialization dataWithJSONObject:@[text] options:0 error:nil];
+                NSString *payload = json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : nil;
+                if (payload.length >= 2) argument = [payload substringWithRange:NSMakeRange(1, payload.length - 2)];
+            }
+            NSString *script = [NSString stringWithFormat:@"window.__copysyncClipboardCallback && window.__copysyncClipboardCallback(%@)", argument];
+            [self.webView evaluateJavaScript:script completionHandler:nil];
+        });
     } else if ([type isEqual:@"openWeb"]) {
         [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"https://copy-direct.example.com/"]];
     }
+}
+
+- (void)webView:(WKWebView *)webView runOpenPanelWithParameters:(WKOpenPanelParameters *)parameters initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(NSArray<NSURL *> *URLs))completionHandler {
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.allowsMultipleSelection = parameters.allowsMultipleSelection;
+    panel.canChooseDirectories = parameters.allowsDirectories;
+    panel.canChooseFiles = YES;
+    [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+        completionHandler(result == NSModalResponseOK ? panel.URLs : nil);
+    }];
 }
 
 - (void)pasteLatestText {

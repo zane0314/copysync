@@ -148,7 +148,7 @@ INDEX_HTML = """<!doctype html>
     .file-name { font-size:16px; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; margin-bottom:5px; }
     .file-preview { white-space:nowrap; text-overflow:ellipsis; overflow:hidden; color:#39433d; margin-bottom:4px; }
     .row-actions { display:flex; align-items:center; gap:3px; white-space:nowrap; }
-    .row-actions .act { background:none; border:0; font-size:13px; font-weight:400; color:#5c665f; padding:6px 8px; border-radius:6px; cursor:pointer; text-decoration:none; transition:all .15s ease; }
+    .row-actions .act { -webkit-appearance:none; appearance:none; background:none; border:0; font-family:inherit; font-size:13px; font-weight:400; line-height:1.2; color:#5c665f; padding:6px 8px; border-radius:6px; cursor:pointer; text-decoration:none; transition:all .15s ease; display:inline-flex; align-items:center; justify-content:center; min-height:30px; box-sizing:border-box; }
     .row-actions .act:hover { color:var(--green); background:#f0f7f2; transform:translateY(-1px); box-shadow:none; }
     .row-actions .act:active { transform:translateY(1px); }
     .empty { text-align:center; padding:45px 12px; color:var(--muted); }
@@ -248,6 +248,7 @@ INDEX_HTML = """<!doctype html>
     .mac-home { min-height:calc(100vh - 60px); }
     .mac-title-row { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:20px; }
     .mac-title-row h1 { color:#162019; font-size:24px; margin-bottom:6px; }
+    .mac-refresh-btn { flex:0 0 auto; margin-top:4px; }
     .mac-online { display:flex; align-items:center; gap:9px; color:#5c665f; font-size:13px; }
     .mac-upload { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
     body.mac-app .drop-hint { display:flex; align-items:center; flex:1; }
@@ -272,7 +273,7 @@ INDEX_HTML = """<!doctype html>
       .drive { padding:16px 12px; }
       .drop-hint { display:none; }
       .file-row { grid-template-columns:26px minmax(0,1fr); min-height:92px; }
-      .row-actions { grid-column:2; justify-content:flex-start; margin-top:-8px; overflow:auto; }
+      .row-actions { grid-column:2; justify-content:flex-start; margin-top:2px; flex-wrap:wrap; }
       .row-actions .act { min-height:40px; }
       .file-icon { width:46px; height:46px; }
     }
@@ -403,11 +404,13 @@ async function renderApp() {
   smartInput.onkeydown = e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendTransfer(); };
   smartInput.oninput = () => { if (IS_ANDROID_APP) document.getElementById('androidSendOptions').classList.toggle('hidden', !smartInput.value.trim()); };
   clearAll.onclick = async () => confirm('删除全部未固定内容？已固定内容会保留。') && clearItems('/api/clear-temp');
-  refreshBtn.onclick = refreshNow;
+  refreshBtn.onclick = () => refreshNow();
+  const macRefreshBtn = document.getElementById('macRefreshBtn');
+  if (macRefreshBtn) macRefreshBtn.onclick = () => refreshNow(macRefreshBtn);
   driveFiles.onchange = () => uploadDriveFiles(driveFiles.files);
   transferFiles.onchange = async () => { selectTransferFiles(transferFiles.files); if (IS_MAC_APP) await sendTransfer(); };
   transferImages.onchange = async () => { selectTransferFiles(transferImages.files); if (IS_MAC_APP) await sendTransfer(); };
-  pasteText.onclick = async () => { if (IS_ANDROID_APP) showAndroidSection('send'); try { smartInput.value = await navigator.clipboard.readText(); smartInput.dispatchEvent(new Event('input')); if (IS_MAC_APP) await sendTransfer(); else smartInput.focus(); } catch { fileMsg.textContent = IS_MAC_APP ? '无法读取剪贴板' : '请长按输入框粘贴文本'; smartInput.focus(); } };
+  pasteText.onclick = async () => { if (IS_ANDROID_APP) showAndroidSection('send'); try { const text = (IS_MAC_APP && window.webkit?.messageHandlers?.copySync) ? await readMacClipboard() : await navigator.clipboard.readText(); smartInput.value = text; smartInput.dispatchEvent(new Event('input')); if (IS_MAC_APP) await sendTransfer(); else smartInput.focus(); } catch { fileMsg.textContent = IS_MAC_APP ? '剪贴板里没有文本' : '请长按输入框粘贴文本'; smartInput.focus(); } };
   searchInput.oninput = renderItems;
   filters.onclick = e => { const chip = e.target.closest('.chip'); if (!chip) return; filters.querySelectorAll('.chip').forEach(x => x.classList.remove('active')); chip.classList.add('active'); renderItems(); };
   bindDrop(dropZone, files => uploadDriveFiles(files));
@@ -423,7 +426,7 @@ async function renderApp() {
 }
 function macAppHtml() {
   return `<section class="mac-home" id="macInbox">
-    <div class="mac-title-row"><div><h1>收件箱</h1><div class="mac-online"><span class="dot"></span><span id="macOnlineCount">设备连接中</span></div></div></div>
+    <div class="mac-title-row"><div><h1>收件箱</h1><div class="mac-online"><span class="dot"></span><span id="macOnlineCount">设备连接中</span></div></div><button class="ghost mac-refresh-btn" id="macRefreshBtn" title="刷新收件箱">刷新</button></div>
     <div class="mac-upload"><span class="drop-hint" id="dropZone">⬇ 拖文件到这里上传</span><label class="button" for="driveFiles">上传</label></div>
     <div class="mac-sendbar"><select id="targetDevice" aria-label="发送目标"></select><button class="mac-action" id="pasteText">${androidIcon('text')}粘贴文本</button><label class="mac-action" for="transferFiles">${androidIcon('file')}选文件</label><label class="mac-action" for="transferImages">${androidIcon('image')}选照片</label></div>
     <p class="muted mac-file-msg" id="fileMsg"></p>
@@ -534,6 +537,15 @@ function copySyncLocalFileReady(deliveryKey, name) {
 }
 function copySyncLocalFileFailed(deliveryKey, name) {
   showGlassToast('接收失败：' + (name || '文件'));
+}
+function readMacClipboard() {
+  return new Promise((resolve, reject) => {
+    window.__copysyncClipboardCallback = text => {
+      window.__copysyncClipboardCallback = null;
+      (typeof text === 'string') ? resolve(text) : reject(new Error('no text'));
+    };
+    window.webkit.messageHandlers.copySync.postMessage({type:'readClipboard'});
+  });
 }
 async function copyToSystemClipboard(text) {
   if (IS_MAC_APP) {
@@ -769,13 +781,14 @@ async function uploadForm(body) {
   catch (err) { uploadBtn.textContent = '发送失败'; fileMsg.textContent = err.message; }
   finally { setTimeout(() => { uploadBtn.disabled = false; uploadBtn.textContent = '发送'; }, 1000); }
 }
-async function refreshNow() {
-  const old = refreshBtn.textContent;
-  refreshBtn.disabled = true;
-  refreshBtn.textContent = '刷新中';
-  try { await loadItems(true); refreshBtn.textContent = '已刷新'; }
-  catch (err) { refreshBtn.textContent = '刷新失败'; }
-  finally { setTimeout(() => { refreshBtn.disabled = false; refreshBtn.textContent = old; }, 1200); }
+async function refreshNow(btn) {
+  const button = btn || document.getElementById('refreshBtn');
+  const old = button.textContent;
+  button.disabled = true;
+  button.textContent = '刷新中';
+  try { await Promise.all([loadItems(true), loadTransfers(), loadDevices(), loadUsage()]); button.textContent = '已刷新'; }
+  catch (err) { button.textContent = '刷新失败'; }
+  finally { setTimeout(() => { button.disabled = false; button.textContent = old; }, 1200); }
 }
 async function loadItems(force=false) {
   const data = await api('/api/items', {cache:'no-store'});
