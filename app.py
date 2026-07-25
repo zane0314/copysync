@@ -93,7 +93,9 @@ INDEX_HTML = """<!doctype html>
   <link rel="icon" type="image/png" href="/favicon.png">
   <style>
     :root { color-scheme: light; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; --green:#0b5c3e; --green-dark:#074a32; --green-press:#063f2b; --sage:#eef6f0; --line:#eee9e2; --muted:#69716c; --bg:#faf9f7; --card-shadow:0 6px 18px rgba(60,50,35,.04); }
-    * { box-sizing:border-box; }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    button:focus, .act:focus, .pin:focus { outline:none; }
+    button:focus-visible, .act:focus-visible { outline:2px solid rgba(11,92,62,.4); outline-offset:2px; }
     body { margin:0; background:var(--bg); color:#171c19; }
     button,input,textarea,select { font:inherit; }
     button,.button { border:0; border-radius:9px; padding:11px 18px; cursor:pointer; font-weight:650; background:var(--green); color:#fff; text-decoration:none; transition:all .15s ease; }
@@ -134,7 +136,7 @@ INDEX_HTML = """<!doctype html>
     .file-list { border:1px solid #f0ebe3; border-radius:12px; overflow:hidden; background:#fff; }
     .file-row { display:grid; grid-template-columns:26px minmax(0,1fr) auto; align-items:center; gap:12px; min-height:84px; padding:12px 14px; border-bottom:1px solid #f3efe8; }
     .file-row:last-child { border-bottom:0; }
-    .pin { width:26px; height:34px; border:0; background:none; font-size:15px; cursor:pointer; display:grid; place-items:center; padding:0; transition:transform .15s ease, opacity .15s ease; }
+    .pin { width:26px; height:34px; border:0; background:none; font-size:15px; cursor:pointer; display:grid; place-items:center; padding:0; transition:transform .35s cubic-bezier(.34,1.45,.64,1), opacity .2s ease, filter .2s ease; }
     .pin.off { transform:rotate(-45deg); filter:grayscale(1); opacity:.45; }
     .pin.off:hover { opacity:.85; transform:rotate(-45deg) scale(1.12); }
     .pin.on { color:var(--green); }
@@ -765,7 +767,7 @@ function renderItems() {
       (!kind || (kind === 'text' && i.kind === 'text') || (kind === 'image' && i.mime.startsWith('image/')) || (kind === 'file' && i.kind !== 'text' && !i.mime.startsWith('image/')) || (kind === 'pinned' && i.pinned));
   });
   items.innerHTML = visible.length ? visible.map(itemHtml).join('') : '<div class="empty">这里还没有内容</div>';
-  document.querySelectorAll('[data-pin]').forEach(b => b.onclick = () => mutate('/api/items/' + b.dataset.pin + '/pin'));
+  document.querySelectorAll('[data-pin]').forEach(b => b.onclick = () => { b.classList.toggle('off'); b.classList.toggle('on'); mutate('/api/items/' + b.dataset.pin + '/pin'); });
   document.querySelectorAll('[data-extend]').forEach(b => b.onclick = () => mutate('/api/items/' + b.dataset.extend + '/extend'));
   document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => confirm(b.dataset.pinned === '1' ? '这是已钉住内容，确认删除？' : '删除这条内容？') && mutate('/api/items/' + b.dataset.del, 'DELETE'));
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => copyItem(b));

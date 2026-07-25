@@ -229,7 +229,7 @@ public final class MainActivity extends Activity {
         Button settings = navButton("设置", R.drawable.ic_nav_settings, null);
         settings.setOnClickListener(v -> showSettings());
         nav.addView(settings);
-        column.addView(nav, new LinearLayout.LayoutParams(-1, dp(62)));
+        column.addView(nav, new LinearLayout.LayoutParams(-1, dp(70)));
         root.addView(column, new FrameLayout.LayoutParams(-1, -1));
         pullIndicator = buildPullIndicator();
         FrameLayout.LayoutParams indicatorParams = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
@@ -286,9 +286,12 @@ public final class MainActivity extends Activity {
         button.setTextColor(Color.rgb(11, 92, 62));
         button.setAllCaps(false);
         button.setBackgroundColor(Color.TRANSPARENT);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setPadding(0, dp(4), 0, dp(2));
         button.setCompoundDrawablesWithIntrinsicBounds(0, icon, 0, 0);
         button.setCompoundDrawableTintList(ColorStateList.valueOf(Color.rgb(11, 92, 62)));
-        button.setCompoundDrawablePadding(dp(3));
+        button.setCompoundDrawablePadding(dp(2));
         button.setLayoutParams(new LinearLayout.LayoutParams(0, -1, 1));
         if (script != null) button.setOnClickListener(v -> webView.evaluateJavascript(script, null));
         return button;
