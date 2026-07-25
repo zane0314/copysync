@@ -114,6 +114,7 @@ CopySync 前端是内嵌在 `app.py` 中 `INDEX_HTML` 的单文件 SPA，一套�
 4. 端口 15080、systemd、nginx、Cookie 策略、限速、登录凭据全部不动。
 5. 部署必须走「备份 → 替换 → 重启 → 验证 → 清理测试数据」流程。
 6. 上线后更新 VPS 交接 txt 的 CopySync 段（新行为说明 + 验收结果），遵循 vps-inventory-handoff-manager 规范。
+7. **最终 web 效果必须与 V7 mockup 一模一样，任何元素不得出现重叠**（用户追加，硬性约束）。
 
 ## 五、参考
 
