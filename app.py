@@ -193,37 +193,48 @@ INDEX_HTML = """<!doctype html>
     .login-panel button { width:100%; }
     .go-panel article { border:1px solid var(--line); border-radius:10px; padding:14px; margin:10px 0; }
     .top { display:flex; align-items:center; justify-content:space-between; gap:15px; }
-    body.android-app { background:#fff; }
+    body.android-app { background:var(--bg); }
     body.android-app .header { display:none; }
     body.android-app main { max-width:620px; padding:25px 18px 30px; }
-    .android-home { color:#151b18; }
+    .android-home,.android-inbox,.android-drive { color:#151b18; }
     .android-brand { color:var(--green); font-size:38px; font-weight:820; letter-spacing:-1.3px; margin:2px 0 5px; }
-    .android-online { display:flex; align-items:center; gap:10px; font-size:16px; margin-bottom:28px; }
-    .android-target { display:grid; grid-template-columns:54px minmax(0,1fr); align-items:center; gap:10px; border:1px solid #d8ded9; border-radius:16px; padding:10px 12px; min-height:74px; background:#fff; }
-    .android-target-icon { width:48px; height:48px; border-radius:12px; display:grid; place-items:center; color:var(--green); background:#eef5f0; font-size:27px; }
+    .android-online { display:flex; align-items:center; gap:10px; font-size:16px; margin-bottom:20px; color:#5c665f; }
+    .android-target { display:grid; grid-template-columns:54px minmax(0,1fr); align-items:center; gap:10px; border:1px solid var(--line); border-radius:14px; padding:10px 12px; min-height:74px; background:#fff; box-shadow:var(--card-shadow); }
+    .android-target-icon { width:48px; height:48px; border-radius:12px; display:grid; place-items:center; color:var(--green); background:var(--sage); font-size:27px; }
     .android-target-icon svg { width:30px; height:30px; }
-    .android-target select { border:0; padding:8px 4px; font-size:17px; font-weight:600; }
-    .android-quick { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:18px 0 28px; }
-    .android-action { min-width:0; height:142px; border:1px solid #d5ddd7; border-radius:16px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:14px; background:linear-gradient(145deg,#fbfdfb,#f2f7f3); color:#17221b; padding:8px 4px; font-weight:650; cursor:pointer; text-align:center; }
-    button.android-action { color:#17221b; }
-    .android-action-icon { color:var(--green); font-size:40px; line-height:1; }
-    .android-action-icon svg { width:43px; height:43px; }
-    .android-composer { border:1px solid #d8ded9; border-radius:14px; padding:10px; margin:-10px 0 14px; background:#fafcfb; }
+    .android-target select { border:0; padding:8px 4px; font-size:17px; font-weight:600; background:#fff; }
+    .android-quick { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:16px 0 22px; }
+    .android-action { min-width:0; height:120px; border:1px solid var(--line); border-radius:14px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px; background:#fff; color:#17221b; padding:8px 4px; font-weight:650; cursor:pointer; text-align:center; box-shadow:var(--card-shadow); transition:all .15s ease; }
+    button.android-action { color:#17221b; font-weight:650; }
+    .android-action:active { transform:translateY(1px) scale(.98); background:#f0f7f2; box-shadow:none; }
+    .android-action-icon { color:var(--green); font-size:34px; line-height:1; }
+    .android-action-icon svg { width:36px; height:36px; }
+    .android-composer { border:1px dashed #ddd5c9; border-radius:10px; padding:10px; margin:-6px 0 12px; background:#fcfbf9; }
     .android-composer textarea { width:100%; min-height:92px; border:0; resize:vertical; background:transparent; padding:8px; outline:none; }
-    .android-send-options { border:1px solid #e0e4e1; border-radius:14px; padding:12px; margin-bottom:20px; }
-    .android-section-title { font-size:23px; margin:0 0 13px; }
+    .android-send-options { border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:18px; background:#fff; box-shadow:var(--card-shadow); }
+    .android-section-title { font-size:20px; margin:0 0 10px; }
     .android-recents { display:grid; gap:10px; }
-    .android-recents .transfer-row { min-height:78px; border:1px solid #e0e3e0; border-radius:14px; padding:11px 12px; align-items:center; background:#fff; }
-    .android-recents .transfer-row[data-receive],.mac-recents .transfer-row[data-receive] { cursor:pointer; }
-    .android-recents .transfer-row[data-receive]:hover { border-color:#8db9a0; background:#f7fbf8; }
-    .android-recents .transfer-row:last-child { border-bottom:1px solid #e0e3e0; }
+    .android-recents .transfer-row { min-height:72px; border:1px solid var(--line); border-radius:14px; padding:11px 12px; align-items:center; background:#fff; box-shadow:var(--card-shadow); border-bottom:1px solid var(--line); }
+    .android-recents .transfer-row[data-receive] { cursor:pointer; }
+    .android-recents .transfer-row[data-receive]:active { background:#f0f7f2; }
+    .android-recents .transfer-row:last-child { border-bottom:1px solid var(--line); }
     .android-transfer-main { display:grid; grid-template-columns:48px minmax(0,1fr); gap:11px; align-items:center; }
-    .android-transfer-icon { width:48px; height:48px; border-radius:11px; display:grid; place-items:center; background:#eef5f0; color:var(--green); font-size:24px; overflow:hidden; }
+    .android-transfer-icon { width:44px; height:44px; border-radius:11px; display:grid; place-items:center; background:var(--sage); color:var(--green); font-size:22px; overflow:hidden; }
+    .android-transfer-icon svg { width:24px; height:24px; }
     .android-transfer-icon img { width:100%; height:100%; object-fit:cover; }
     .android-status { display:flex; align-items:center; gap:8px; }
-    .android-inbox { padding-top:8px; }
-    .android-inbox .file-list { margin-top:12px; }
-    .android-inbox-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+    .android-status .act { background:none; border:0; font-size:13px; color:#5c665f; padding:8px 9px; border-radius:6px; cursor:pointer; text-decoration:none; transition:all .15s ease; }
+    .android-status .act:active { color:var(--green); background:#eef6f0; transform:translateY(1px); }
+    .android-inbox,.android-drive { padding-top:8px; }
+    .android-inbox .myfiles-box,.android-drive .file-list { margin-top:12px; }
+    .android-inbox-head,.android-drive-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+    .android-drive .drive-head { margin-top:10px; display:flex; align-items:center; gap:10px; }
+    body.android-app .drop-hint { display:flex; align-items:center; flex:1; }
+    body.android-app .drive-head .button { width:auto; flex:0 0 auto; }
+    .android-inbox .myfiles-box .transfer-row { padding:11px 12px; align-items:center; }
+    .android-inbox .myfiles-box .transfer-row:last-child { border-bottom:0; }
+    .android-inbox .myfiles-box > p.muted { padding:12px; margin:0; }
+    .android-page-title { font-size:26px; font-weight:800; color:var(--green); letter-spacing:-.8px; margin:2px 0 4px; }
     body.mac-app { min-height:100vh; color-scheme:dark; background:#171a18; color:#f4f7f5; --green:#70e59b; --line:rgba(255,255,255,.13); --muted:#9da7a1; }
     body.mac-app .header { display:none; }
     body.mac-app main { max-width:none; min-height:100vh; padding:28px 30px 36px; background:#171a18; }
@@ -241,6 +252,7 @@ INDEX_HTML = """<!doctype html>
     .mac-section-title { color:#f5f8f6; font-size:20px; margin-bottom:12px; }
     .mac-recents { border:1px solid rgba(255,255,255,.14); border-radius:13px; overflow:hidden; background:rgba(255,255,255,.035); }
     .mac-recents .transfer-row { min-height:92px; padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.11); align-items:center; }
+    .mac-recents .transfer-row[data-receive] { cursor:pointer; }
     .mac-recents .transfer-row:last-child { border-bottom:0; }
     .mac-transfer-main { display:grid; grid-template-columns:58px minmax(0,1fr); gap:14px; align-items:center; }
     .mac-transfer-icon { width:58px; height:58px; border-radius:11px; display:grid; place-items:center; background:rgba(91,214,135,.12); border:1px solid rgba(91,214,135,.28); color:#8ee9ae; font-size:27px; overflow:hidden; }
@@ -305,6 +317,7 @@ let allItems = [];
 let itemsFingerprint = '';
 let itemEvents;
 let latestTransfers = [];
+let androidInboxShown = [];
 let deviceNames = {web:'网页', mac:'Mac', android:'Android', all:'全部设备'};
 async function route() {
   document.body.classList.toggle('android-app', IS_ANDROID_APP);
@@ -422,29 +435,33 @@ function macAppHtml() {
 }
 function androidIcon(kind) {
   const paths = {
-    laptop:'<rect x="4" y="5" width="16" height="12" rx="1.5"/><path d="M2 20h20M8 20l1-3h6l1 3"/>',
-    text:'<path d="M6 2h9l5 5v15H6z"/><path d="M15 2v6h5M9 12h8M9 16h8"/>',
-    folder:'<path d="M3 6h7l2 2h9v11H3z"/>',
-    image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><path d="M5 18l5-5 3 3 2-2 4 4"/>'
+    laptop:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+    text:'<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>',
+    file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+    image:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.5-3.5a2 2 0 0 0-3 0L6 20"/>',
+    note:'<path d="M4 17l6-6-6-6M12 19h8"/>'
   };
-  return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[kind]}</svg>`;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${paths[kind]}</svg>`;
 }
 function androidAppHtml() {
   return `<section class="android-home" id="androidHome">
     <div class="android-brand">CopySync</div><div class="android-online"><span class="dot"></span><span id="onlineCount">设备连接中</span></div>
-    <div class="android-target"><div class="android-target-icon">${androidIcon('laptop')}</div><select id="targetDevice" aria-label="发送目标"><option value="all">发送到：全部设备</option></select></div>
-    <div class="android-quick"><button class="android-action" id="pasteText"><span class="android-action-icon">${androidIcon('text')}</span><span>粘贴文本</span></button><label class="android-action" for="transferFiles"><span class="android-action-icon">${androidIcon('folder')}</span><span>选文件</span></label><label class="android-action" for="transferImages"><span class="android-action-icon">${androidIcon('image')}</span><span>选照片</span></label></div>
+    <div class="android-target"><div class="android-target-icon">${androidIcon('laptop')}</div><select id="targetDevice" aria-label="发送目标"></select></div>
+    <div class="android-quick"><button class="android-action" id="pasteText"><span class="android-action-icon">${androidIcon('text')}</span><span>粘贴文本</span></button><label class="android-action" for="transferFiles"><span class="android-action-icon">${androidIcon('file')}</span><span>选文件</span></label><label class="android-action" for="transferImages"><span class="android-action-icon">${androidIcon('image')}</span><span>选照片</span></label></div>
     <div class="android-composer hidden" id="transferDrop"><textarea id="smartInput" placeholder="输入或长按粘贴文本"></textarea></div>
-    <div class="android-send-options hidden" id="androidSendOptions"><div class="selected-file hidden" id="selectedFile">📎 <span></span></div><label class="checkline"><input id="syncWeb" type="checkbox" checked><span>目标是否同步到网页</span></label><select id="transferTtl" aria-label="保留时间"><option value="14400">保留 4 小时</option><option value="86400">保留 1 天</option><option value="259200">保留 3 天</option><option value="604800">保留 7 天</option></select><button class="send-button" id="uploadBtn">发送</button><p class="muted transfer-msg" id="fileMsg"></p></div>
+    <div class="android-send-options hidden" id="androidSendOptions"><div class="selected-file hidden" id="selectedFile">📎 <span></span></div><input class="hidden" id="syncWeb" type="checkbox" checked aria-hidden="true" tabindex="-1"><select id="transferTtl" aria-label="保留时间"><option value="14400">保留 4 小时</option><option value="86400" selected>保留 1 天</option><option value="259200">保留 3 天</option><option value="604800">保留 7 天</option></select><div class="ttl-note">默认 1 天，到期自动删除；网页自动保留记录</div><button class="send-button" id="uploadBtn">发送</button><p class="muted transfer-msg" id="fileMsg"></p></div>
     <input class="hidden" id="transferFiles" type="file" multiple><input class="hidden" id="transferImages" type="file" accept="image/*" multiple>
-    <h2 class="android-section-title">最近投递</h2><div class="android-recents" id="recentTransfers"><p class="muted">暂无传输</p></div>
+    <h2 class="android-section-title">传输记录</h2><div class="android-recents" id="androidRecords"><p class="muted">暂无记录</p></div>
   </section>
-  <section class="android-inbox hidden" id="androidInbox"><div class="android-inbox-head"><div><h1>收件箱</h1><div class="muted" id="capacity">正在计算空间…</div></div><label class="button secondary" for="driveFiles">上传文件</label></div><input class="hidden" id="driveFiles" type="file" multiple><div id="dropZone"><input class="search" id="searchInput" placeholder="搜索文本、文件和图片"><div class="filters" id="filters"><button class="chip active" data-kind="">全部</button><button class="chip" data-kind="text">文本</button><button class="chip" data-kind="file">文件</button><button class="chip" data-kind="image">图片</button><button class="chip" data-kind="pinned">已固定</button></div><div class="file-list" id="items"><div class="empty">正在载入…</div></div></div><div class="top" style="margin-top:12px"><span class="muted" id="clearMsg"></span><div><button class="ghost" id="refreshBtn">刷新</button><button class="ghost" id="clearAll">清理</button></div></div></section>`;
+  <section class="android-inbox hidden" id="androidInbox"><div class="android-page-title">收件箱</div><div class="muted">收到的内容 · 到期自动消失</div><div class="myfiles-box" id="androidInboxList"><p class="muted">暂无内容</p></div><h2 class="android-section-title" style="margin-top:18px">传输记录</h2><div class="android-recents" id="androidInboxRecords"><p class="muted">暂无记录</p></div></section>
+  <section class="android-drive hidden" id="androidDrive"><div class="android-page-title">网盘</div><div class="muted"><span id="capacity">正在计算空间…</span> · 默认保存 7 天</div><div class="drive-head"><span class="drop-hint" id="dropZone">⬇ 拖文件到这里上传</span><label class="button" for="driveFiles">上传</label><input class="hidden" id="driveFiles" type="file" multiple></div><input class="search" id="searchInput" placeholder="搜索文本、文件和图片"><div class="filters" id="filters"><button class="chip active" data-kind="">全部</button><button class="chip" data-kind="text">文本</button><button class="chip" data-kind="file">文件</button><button class="chip" data-kind="image">图片</button><button class="chip" data-kind="pinned">已固定</button></div><div class="file-list" id="items"><div class="empty">正在载入…</div></div><div class="top" style="margin-top:12px"><span class="muted" id="clearMsg"></span><div><button class="ghost" id="refreshBtn">刷新</button><button class="ghost" id="clearAll">清理</button></div></div></section>`;
 }
 function showAndroidSection(section) {
   if (!IS_ANDROID_APP) return;
-  androidHome.classList.toggle('hidden', section === 'inbox');
-  androidInbox.classList.toggle('hidden', section !== 'inbox');
+  const target = section === 'send' ? 'home' : section;
+  androidHome.classList.toggle('hidden', target !== 'home');
+  androidInbox.classList.toggle('hidden', target !== 'inbox');
+  androidDrive.classList.toggle('hidden', target !== 'drive');
   if (section === 'send') { transferDrop.classList.remove('hidden'); androidSendOptions.classList.remove('hidden'); smartInput.focus(); }
   scrollTo({top:0, behavior:'smooth'});
 }
@@ -484,7 +501,7 @@ async function loadDevices() {
   const data = await api('/api/devices', {cache:'no-store'});
   const previous = targetDevice.value;
   data.devices.forEach(d => deviceNames[d.id] = d.name);
-  targetDevice.innerHTML = (IS_ANDROID_APP || IS_MAC_APP ? `<option value="all">发送到：全部设备</option>` : '') + data.devices.filter(d => d.id !== 'web' && d.id !== 'windows' && d.id !== CURRENT_DEVICE).map(d => `<option value="${d.id}">${IS_ANDROID_APP || IS_MAC_APP ? '发送到：' : ''}${escapeHtml(d.name)}${d.online ? ' · 在线' : ' · 离线'}</option>`).join('');
+  targetDevice.innerHTML = (IS_MAC_APP ? `<option value="all">发送到：全部设备</option>` : '') + data.devices.filter(d => d.id !== 'web' && d.id !== 'windows' && d.id !== CURRENT_DEVICE).map(d => `<option value="${d.id}">${IS_ANDROID_APP || IS_MAC_APP ? '发送到：' : ''}${escapeHtml(d.name)}${d.online ? ' · 在线' : ' · 离线'}</option>`).join('');
   const values = [...targetDevice.options].map(o => o.value);
   const fallback = IS_ANDROID_APP ? 'mac' : 'android';
   targetDevice.value = previous && values.includes(previous) ? previous : (values.includes(fallback) ? fallback : values[0]);
@@ -541,15 +558,35 @@ async function loadTransfers() {
   latestTransfers = relevant;
   const labels = {waiting:'等待接收', delivered:'已送达', downloaded:'已接收', copied:'已接收', failed:'失败'};
   if (IS_ANDROID_APP) {
-    recentTransfers.innerHTML = relevant.length ? relevant.slice(0,8).map(t => {
+    const seenItems = new Set();
+    const inboxList = [];
+    for (const t of relevant) {
+      if (seenItems.has(t.item_id)) continue;
+      seenItems.add(t.item_id);
+      inboxList.push(t);
+    }
+    androidInboxShown = inboxList.slice(0,8);
+    androidInboxList.innerHTML = androidInboxShown.length ? androidInboxShown.map(t => {
       const image = t.mime?.startsWith('image/');
-      const icon = image ? `<img src="/download/${t.item_id}?inline=1" alt="">` : t.kind === 'text' ? '↗' : '▰';
+      const icon = image ? `<img src="/download/${t.item_id}?inline=1" alt="">` : androidIcon(t.kind === 'text' ? 'note' : 'file');
       const incoming = t.target_device === CURRENT_DEVICE;
-      const received = t.status === 'downloaded' || t.status === 'copied';
-      const action = incoming ? (received ? '已接收' : (t.kind === 'text' ? '点按复制' : '点按接收')) : (received ? '对方已接收' : (labels[t.status] || t.status));
-      const interaction = `role="button" tabindex="0" data-receive="${t.id}"`;
-      return `<div class="transfer-row" ${interaction}><div class="android-transfer-main"><div class="android-transfer-icon">${icon}</div><div><strong>${escapeHtml(t.kind === 'text' ? (t.text || '文本').slice(0,18) : t.name || '文件')}</strong><div class="muted">${escapeHtml(deviceNames[t.source_device] || t.source_device)} → ${escapeHtml(deviceNames[t.target_device] || t.target_device)}</div></div></div><div class="android-status"><span class="status ${t.status}">${action}</span>${incoming ? '<span>›</span>' : ''}</div></div>`;
-    }).join('') : '<p class="muted">暂无传输</p>';
+      const dir = incoming ? `来自 ${escapeHtml(deviceNames[t.source_device] || t.source_device)}` : `发至 ${escapeHtml(deviceNames[t.target_device] || t.target_device)}`;
+      const second = t.kind === 'text' ? `<button class="act" data-tcopy="${t.item_id}">复制</button>` : `<button class="act" data-dl="${t.id}">下载</button>`;
+      return `<div class="transfer-row" role="button" tabindex="0" data-receive="${t.id}"><div class="android-transfer-main"><div class="android-transfer-icon">${icon}</div><div><strong>${escapeHtml(t.kind === 'text' ? (t.text || '文本').slice(0,18) : t.name || '文件')}</strong><div class="muted">${dir} · ${fmtRemain(t.expires_at)}</div></div></div><div class="android-status"><button class="act" data-keep="${t.item_id}">上传</button>${second}</div></div>`;
+    }).join('') : '<p class="muted">暂无内容</p>';
+    const liveRows = relevant.map(t => ({...t, expired: false}));
+    const historyRows = (data.history || []).filter(h => h.source_device === CURRENT_DEVICE || h.target_device === CURRENT_DEVICE).map(h => ({...h, expired: true}));
+    const records = [...liveRows, ...historyRows].sort((a, b) => b.created_at - a.created_at).slice(0,8);
+    const recordsHtml = records.length ? records.map(t => {
+      const name = t.kind === 'text' ? (t.text || '文本').slice(0,18) : t.name || '文件';
+      const status = t.expired ? '<span class="status expired">已过期 · 文件已删</span>' : `<span class="status ${t.status}">${labels[t.status] || t.status}</span>`;
+      return `<div class="transfer-row ${t.expired ? 'expired' : ''}"><div><strong>${escapeHtml(name)}</strong><div class="muted">${escapeHtml(deviceNames[t.source_device] || t.source_device)} → ${escapeHtml(deviceNames[t.target_device] || t.target_device)}</div></div>${status}</div>`;
+    }).join('') : '<p class="muted">暂无记录</p>';
+    androidRecords.innerHTML = recordsHtml;
+    androidInboxRecords.innerHTML = recordsHtml;
+    androidInboxList.querySelectorAll('[data-keep]').forEach(b => b.onclick = e => { e.stopPropagation(); keepItem(b.dataset.keep); });
+    androidInboxList.querySelectorAll('[data-tcopy]').forEach(b => b.onclick = e => { e.stopPropagation(); const t = latestTransfers.find(x => x.item_id === b.dataset.tcopy); if (t) copyToSystemClipboard(t.text || '').then(() => showGlassToast('文本已复制')); });
+    androidInboxList.querySelectorAll('[data-dl]').forEach(b => b.onclick = e => { e.stopPropagation(); receiveTransfer(b.dataset.dl); });
   } else if (IS_MAC_APP) {
     recentTransfers.innerHTML = relevant.length ? relevant.slice(0,6).map(t => { const image=t.mime?.startsWith('image/'); const icon=image ? `<img src="/download/${t.item_id}?inline=1" alt="">` : t.kind==='text' ? '↗' : '▰'; const incoming=t.target_device===CURRENT_DEVICE; const action=incoming&&t.status==='waiting'?(t.kind==='text'?'点按复制':'点按接收'):(labels[t.status]||t.status); return `<div class="transfer-row" role="button" tabindex="0" data-receive="${t.id}"><div class="mac-transfer-main"><div class="mac-transfer-icon">${icon}</div><div><div class="mac-transfer-name">${escapeHtml(t.kind==='text' ? (t.text || '文本').slice(0,42) : t.name || '文件')}</div><div class="muted">${escapeHtml(deviceNames[t.source_device] || t.source_device)} → ${escapeHtml(deviceNames[t.target_device] || t.target_device)}</div></div></div><div class="mac-status-wrap"><span class="status ${t.status}">${action}</span><span>›</span></div></div>`; }).join('') : '<p class="muted empty">暂无传输</p>';
   } else {
@@ -579,14 +616,14 @@ async function loadTransfers() {
     myFiles.querySelectorAll('[data-keep]').forEach(b => b.onclick = () => keepItem(b.dataset.keep));
     myFiles.querySelectorAll('[data-tcopy]').forEach(b => b.onclick = () => { const t = latestTransfers.find(x => x.item_id === b.dataset.tcopy); if (t) copyToSystemClipboard(t.text || '').then(() => showGlassToast('文本已复制')); });
   }
-  if (typeof recentTransfers !== 'undefined' && recentTransfers) {
-  recentTransfers.querySelectorAll('[data-receive]').forEach(row => {
+  document.querySelectorAll('[data-receive]').forEach(row => {
     row.onclick = () => { if (row.dataset.suppressClick === '1') return; receiveTransfer(row.dataset.receive); };
     row.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); receiveTransfer(row.dataset.receive); } };
   });
   if (IS_ANDROID_APP || IS_MAC_APP) {
-    const shown = relevant.slice(0, IS_ANDROID_APP ? 8 : 6);
-    recentTransfers.querySelectorAll('.transfer-row').forEach((row, index) => {
+    const container = IS_ANDROID_APP ? androidInboxList : recentTransfers;
+    const shown = IS_ANDROID_APP ? androidInboxShown : relevant.slice(0,6);
+    container.querySelectorAll('.transfer-row').forEach((row, index) => {
       const transfer = shown[index];
       if (!transfer || transfer.kind === 'text') return;
       const copyLink = document.createElement('button');
@@ -601,7 +638,6 @@ async function loadTransfers() {
       row.addEventListener('pointerdown', event => { startX=event.clientX; startY=event.clientY; });
       row.addEventListener('pointerup', event => { const dx=event.clientX-startX, dy=event.clientY-startY; if (Math.abs(dx)>Math.abs(dy) && Math.abs(dx)>35) { row.dataset.suppressClick='1'; setTimeout(()=>delete row.dataset.suppressClick,250); if (dx>45) row.classList.add('swiped'); else row.classList.remove('swiped'); } });
     });
-  }
   }
 }
 async function keepItem(itemId) {
@@ -664,6 +700,14 @@ async function receiveTransfer(deliveryId) {
 async function loadUsage() {
   const u = await api('/api/usage', {cache:'no-store'}); capacity.textContent = `临时 ${fmtSize(u.temporary)} / ${fmtSize(u.temporary_limit)} · 固定 ${fmtSize(u.pinned)}`;
 }
+async function refreshAll() {
+  await Promise.all([loadItems(true), loadTransfers(), loadDevices(), loadUsage()]);
+}
+window.refreshAll = refreshAll;
+window.pullRefresh = async () => {
+  try { await refreshAll(); showGlassToast('已刷新'); } catch {}
+  finally { if (IS_ANDROID_APP && window.CopySyncNative?.refreshDone) CopySyncNative.refreshDone(); }
+};
 async function uploadSmart() {
   if (fileInput.files.length) {
     const body = new FormData();
