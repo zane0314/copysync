@@ -222,7 +222,12 @@ INDEX_HTML = """<!doctype html>
     .android-transfer-icon { width:44px; height:44px; border-radius:11px; display:grid; place-items:center; background:var(--sage); color:var(--green); font-size:22px; overflow:hidden; }
     .android-transfer-icon svg { width:24px; height:24px; }
     .android-transfer-icon img { width:100%; height:100%; object-fit:cover; }
-    .android-status { display:flex; align-items:center; gap:8px; }
+    .android-status { display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+    .android-status .status { white-space:nowrap; }
+    .android-recents .status { white-space:nowrap; }
+    .android-recents .transfer-row strong { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .android-recents .transfer-row > div { min-width:0; }
+    .android-transfer-main strong { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .android-status .act { background:none; border:0; font-size:13px; color:#5c665f; padding:8px 9px; border-radius:6px; cursor:pointer; text-decoration:none; transition:all .15s ease; }
     .android-status .act:active { color:var(--green); background:#eef6f0; transform:translateY(1px); }
     .android-inbox,.android-drive { padding-top:8px; }
