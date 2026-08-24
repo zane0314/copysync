@@ -1005,7 +1005,7 @@ def migrate_v1(conn):
         );
         create table if not exists item_blobs (
           id integer primary key,
-          item_id integer not null,
+          item_id text not null,
           variant text not null,
           stored_name text not null,
           mime text not null default '',
