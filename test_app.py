@@ -412,6 +412,15 @@ class V1Case(unittest.TestCase):
     def raw_post(self, path, body=None, headers=None):
         return self.raw_request("POST", path, body=body, headers=headers)
 
+    def raw_patch(self, path, body=None, headers=None):
+        return self.raw_request("PATCH", path, body=body, headers=headers)
+
+    def raw_delete(self, path, headers=None):
+        return self.raw_request("DELETE", path, headers=headers)
+
+    def auth(self, token):
+        return {"Authorization": "Bearer " + token}
+
     def login_device(self, name, platform):
         status, body = self.raw_post(
             "/api/v1/auth/login", {"password": PW, "device_name": name, "platform": platform}
@@ -451,6 +460,79 @@ class V1Case(unittest.TestCase):
         self.assertEqual(b["error"]["code"], "login_locked")
         with app.db() as conn:
             conn.execute("delete from login_failures")
+
+    def test_v1_devices_requires_auth_and_lists(self):
+        token, device = self.login_device("ListMac", "mac")
+        s, b = self.raw_get("/api/v1/devices", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        entry = next((d for d in b["devices"] if d["id"] == device["id"]), None)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["name"], "ListMac")
+        self.assertEqual(entry["platform"], "mac")
+        for key in ("id", "name", "platform", "online", "last_seen_at"):
+            self.assertIn(key, entry)
+        self.assertTrue(entry["online"])  # 刚登录，last_seen_at 新鲜
+        s, b = self.raw_get("/api/v1/devices")
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "unauthorized")
+
+    def test_v1_logout_revokes_token(self):
+        token, device = self.login_device("LogoutMac", "mac")
+        s, b = self.raw_post("/api/v1/auth/logout", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        s, b = self.raw_get("/api/v1/devices", headers=self.auth(token))
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "token_revoked")
+
+    def test_v1_heartbeat_path_must_match_token(self):
+        token_a, dev_a = self.login_device("HeartA", "mac")
+        token_b, dev_b = self.login_device("HeartB", "android")
+        s, b = self.raw_post(f"/api/v1/devices/{dev_b['id']}/heartbeat", headers=self.auth(token_a))
+        self.assertEqual(s, 403)
+        self.assertEqual(b["error"]["code"], "device_mismatch")
+        with app.db() as conn:
+            conn.execute("update devices set last_seen_at=0 where id=?", (dev_b["id"],))
+        s, b = self.raw_post(f"/api/v1/devices/{dev_b['id']}/heartbeat", headers=self.auth(token_b))
+        self.assertEqual(s, 200)
+        with app.db() as conn:
+            seen = conn.execute("select last_seen_at from devices where id=?", (dev_b["id"],)).fetchone()[0]
+            changes = conn.execute(
+                "select * from sync_changes where entity='device' and entity_id=?", (dev_b["id"],)
+            ).fetchall()
+        self.assertGreater(seen, 0)
+        self.assertTrue(changes)
+
+    def test_v1_delete_device_revokes_all_tokens(self):
+        token_v1, dev_v = self.login_device("Victim", "android")
+        token_v2, _ = self.login_device("Victim", "android")
+        token_admin, dev_admin = self.login_device("Admin", "mac")
+        s, b = self.raw_delete(f"/api/v1/devices/{dev_v['id']}", headers=self.auth(token_admin))
+        self.assertEqual(s, 200)
+        self.assertEqual(b["revoked_tokens"], 2)
+        for token in (token_v1, token_v2):
+            s, b = self.raw_get("/api/v1/devices", headers=self.auth(token))
+            self.assertEqual(s, 401)
+        s, b = self.raw_delete(f"/api/v1/devices/{dev_v['id']}", headers=self.auth(token_admin))
+        self.assertEqual(s, 409)
+        s, b = self.raw_delete("/api/v1/devices/no-such-device", headers=self.auth(token_admin))
+        self.assertEqual(s, 404)
+        s, b = self.raw_delete(f"/api/v1/devices/{dev_admin['id']}", headers=self.auth(token_admin))
+        self.assertEqual(s, 200)  # 允许撤销自己
+        s, b = self.raw_get("/api/v1/devices", headers=self.auth(token_admin))
+        self.assertEqual(s, 401)
+
+    def test_v1_rename_device(self):
+        token, dev = self.login_device("OldName", "mac")
+        s, b = self.raw_patch(f"/api/v1/devices/{dev['id']}", {"name": "NewName"}, headers=self.auth(token))
+        self.assertEqual(s, 200)
+        self.assertEqual(b["device"]["name"], "NewName")
+        with app.db() as conn:
+            name = conn.execute("select name from devices where id=?", (dev["id"],)).fetchone()[0]
+        self.assertEqual(name, "NewName")
+        s, b = self.raw_patch("/api/v1/devices/no-such-device", {"name": "X"}, headers=self.auth(token))
+        self.assertEqual(s, 404)
+        s, b = self.raw_patch(f"/api/v1/devices/{dev['id']}", {"name": "  "}, headers=self.auth(token))
+        self.assertEqual(s, 400)
 
     def test_v1_error_shape(self):
         status, body = self.raw_get("/api/v1/devices")

@@ -1530,43 +1530,66 @@ class Handler(BaseHTTPRequestHandler):
 
     def route_v1(self):
         path = urllib.parse.urlsplit(self.path).path
-        if path == "/api/v1/auth/login" and self.command == "POST":
+        method = self.command
+        if path == "/api/v1/auth/login" and method == "POST":
             return self.v1_login()
-        if path == "/api/v1/devices" and self.command == "GET":
-            if not self.v1_device():
-                self.api_fail(401, "unauthorized", "需要登录")
-            with db() as conn:
-                rows = conn.execute(
-                    "select id, name, platform, last_seen_at, enabled from devices order by id"
-                ).fetchall()
-            self.send_json({"devices": [dict(row) for row in rows]})
-            return
+        if path == "/api/v1/auth/logout" and method == "POST":
+            return self.v1_logout()
+        if path == "/api/v1/devices" and method == "GET":
+            return self.v1_list_devices()
+        if path.startswith("/api/v1/devices/"):
+            rest = urllib.parse.unquote(path[len("/api/v1/devices/"):])
+            if rest.endswith("/heartbeat") and method == "POST":
+                return self.v1_heartbeat(rest[:-len("/heartbeat")])
+            if method == "PATCH":
+                return self.v1_rename_device(rest)
+            if method == "DELETE":
+                return self.v1_delete_device(rest)
         self.api_fail(404, "not_found", "接口不存在")
 
-    def v1_device(self):
-        token = None
+    def v1_token(self):
         auth = self.headers.get("authorization", "")
         if auth.startswith("Bearer "):
-            token = auth[len("Bearer "):].strip()
-        elif self.headers.get("cookie"):
+            return auth[len("Bearer "):].strip()
+        if self.headers.get("cookie"):
             jar = cookies.SimpleCookie()
             try:
                 jar.load(self.headers.get("cookie"))
             except cookies.CookieError:
-                jar = {}
+                return None
             if "webclip_v1" in jar:
-                token = jar["webclip_v1"].value
+                return jar["webclip_v1"].value
+        return None
+
+    def v1_device(self):
+        token = self.v1_token()
         if not token:
             return None
-        try:
+        with db() as conn:
+            row = conn.execute(
+                "select d.*, t.id as token_id from device_tokens t join devices d on d.id = t.device_id "
+                "where t.token_hash = ? and t.revoked_at is null and d.enabled = 1",
+                (hashlib.sha256(token.encode()).hexdigest(),),
+            ).fetchone()
+            if not row:
+                return None
+            conn.execute("update device_tokens set last_used_at=? where id=?", (now_iso(), row["token_id"]))
+        return row
+
+    def require_v1_device(self):
+        token = self.v1_token()
+        if token:
             with db() as conn:
-                return conn.execute(
-                    "select d.* from device_tokens t join devices d on d.id = t.device_id "
-                    "where t.token_hash = ? and t.revoked_at is null and d.enabled = 1",
+                row = conn.execute(
+                    "select revoked_at from device_tokens where token_hash=?",
                     (hashlib.sha256(token.encode()).hexdigest(),),
                 ).fetchone()
-        except sqlite3.OperationalError:
-            return None  # device_tokens 表由 migrate_v1 创建
+            if row and row["revoked_at"] is not None:
+                self.api_fail(401, "token_revoked", "登录已失效，请重新登录")
+        device = self.v1_device()
+        if not device:
+            self.api_fail(401, "unauthorized", "需要登录")
+        return device
 
     def read_json(self):
         try:
@@ -1618,6 +1641,81 @@ class Handler(BaseHTTPRequestHandler):
         if not ok:
             self.api_fail(401, "invalid_credentials", "密码错误")
         self.send_json({"token": token, "device": {"id": device_id, "name": name, "platform": platform}})
+
+    def v1_logout(self):
+        token = self.v1_token()
+        self.require_v1_device()
+        with db() as conn:
+            conn.execute(
+                "update device_tokens set revoked_at=? where token_hash=? and revoked_at is null",
+                (now_iso(), hashlib.sha256(token.encode()).hexdigest()),
+            )
+        self.send_json({"ok": True})
+
+    def v1_list_devices(self):
+        self.require_v1_device()
+        now = int(time.time())
+        with db() as conn:
+            rows = conn.execute(
+                "select id, name, platform, last_seen_at from devices where enabled=1 order by id"
+            ).fetchall()
+        devices = []
+        for row in rows:
+            device = dict(row)
+            device["online"] = device["id"] == "web" or now - device["last_seen_at"] < 90
+            devices.append(device)
+        self.send_json({"devices": devices})
+
+    def v1_rename_device(self, device_id):
+        self.require_v1_device()
+        name = str(self.read_json().get("name", "")).strip()
+        if not name:
+            self.api_fail(400, "bad_request", "设备名不能为空")
+        with db() as conn:
+            target = conn.execute("select id, platform, enabled from devices where id=?", (device_id,)).fetchone()
+            if not target:
+                self.api_fail(404, "device_not_found", "设备不存在")
+            if not target["enabled"]:
+                self.api_fail(409, "device_revoked", "设备已撤销")
+            conn.execute("update devices set name=? where id=?", (name, device_id))
+            conn.execute(
+                "insert into sync_changes(entity, entity_id, op, created_at) values(?,?,?,?)",
+                ("device", device_id, "upsert", now_iso()),
+            )
+        self.send_json({"device": {"id": device_id, "name": name, "platform": target["platform"]}})
+
+    def v1_delete_device(self, device_id):
+        self.require_v1_device()
+        with db() as conn:
+            target = conn.execute("select id, enabled from devices where id=?", (device_id,)).fetchone()
+            if not target:
+                self.api_fail(404, "device_not_found", "设备不存在")
+            if not target["enabled"]:
+                self.api_fail(409, "device_revoked", "设备已撤销")
+            conn.execute("update devices set enabled=0 where id=?", (device_id,))
+            cursor = conn.execute(
+                "update device_tokens set revoked_at=? where device_id=? and revoked_at is null",
+                (now_iso(), device_id),
+            )
+            revoked = cursor.rowcount
+            conn.execute(
+                "insert into sync_changes(entity, entity_id, op, created_at) values(?,?,?,?)",
+                ("device", device_id, "delete", now_iso()),
+            )
+        self.send_json({"ok": True, "revoked_tokens": revoked})
+
+    def v1_heartbeat(self, device_id):
+        device = self.require_v1_device()
+        if device["id"] != device_id:
+            self.api_fail(403, "device_mismatch", "心跳设备与登录设备不一致")
+        now = int(time.time())
+        with db() as conn:
+            conn.execute("update devices set last_seen_at=? where id=?", (now, device_id))
+            conn.execute(
+                "insert into sync_changes(entity, entity_id, op, created_at) values(?,?,?,?)",
+                ("device", device_id, "upsert", now_iso()),
+            )
+        self.send_json({"ok": True})
 
     def read_body(self, limit=MAX_FILE_BYTES + 1024 * 1024):
         try:
