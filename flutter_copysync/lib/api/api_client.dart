@@ -130,7 +130,8 @@ class Item {
 class ApiClient {
   ApiClient(this.baseUrl);
 
-  final String baseUrl;
+  /// 服务端基址（登录页可修改，如 `http://127.0.0.1:15101`）。
+  String baseUrl;
 
   /// 登录成功后持有的设备 Token；也允许从安全存储恢复后注入。
   String? token;
