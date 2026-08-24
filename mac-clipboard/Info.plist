@@ -8,8 +8,8 @@
   <key>CFBundleName</key><string>CopySync</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundleShortVersionString</key><string>2.1</string>
-  <key>CFBundleVersion</key><string>34</string>
+  <key>CFBundleShortVersionString</key><string>2.2</string>
+  <key>CFBundleVersion</key><string>35</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSAccessibilityUsageDescription</key><string>用于在其他应用按下 Command-V 时粘贴网站中的最新内容。</string>

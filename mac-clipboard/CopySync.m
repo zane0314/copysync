@@ -8,6 +8,7 @@
 
 static NSString *const Site = @"https://copy-direct.example.com/?app=mac";
 static NSString *const UpdateManifest = @"https://copy-direct.example.com/api/update/mac";
+static NSInteger const WebKitPolicyChangeError = 102;
 static NSString *const PendingUploadsKey = @"CopySync.pendingUploads";
 static NSString *const IgnoreNextCopyKey = @"ignoreNextCopy";
 static NSString *const ShowFooterKey = @"showFooter";
@@ -48,6 +49,8 @@ static CopySyncApp *CopySyncDelegate;
 @property (strong) NSScrollView *historyScroll;
 @property (strong) NSButton *historyPinButton;
 @property (strong) WKWebView *webView;
+@property (assign) BOOL webRecoveryScheduled;
+@property (assign) BOOL webRecoveryInProgress;
 @property (strong) NSTextField *footerLabel;
 @property (strong) NSStatusItem *statusItem;
 @property (strong) NSMenu *statusMenu;
@@ -1169,7 +1172,42 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
     [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) { completionHandler(response == NSAlertFirstButtonReturn); }];
 }
 
+- (void)scheduleWebViewRecovery:(NSError *)error {
+    if (error && (([error.domain isEqualToString:NSURLErrorDomain] && error.code == NSURLErrorCancelled) ||
+                  ([error.domain isEqualToString:@"WebKitErrorDomain"] && error.code == WebKitPolicyChangeError))) return;
+    if (self.webRecoveryScheduled) return;
+    self.webRecoveryScheduled = YES;
+    [self setStatusOK:NO message:@"页面连接中断，正在恢复"];
+    [self performSelector:@selector(recoverWebView) withObject:nil afterDelay:1.0];
+}
+
+- (void)recoverWebView {
+    self.webRecoveryScheduled = NO;
+    self.webRecoveryInProgress = YES;
+    NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:Site]
+                                             cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                         timeoutInterval:30];
+    [self.webView loadRequest:request];
+}
+
+- (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+    if (webView == self.webView) [self scheduleWebViewRecovery:error];
+}
+
+- (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
+    if (webView == self.webView) [self scheduleWebViewRecovery:error];
+}
+
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {
+    if (webView == self.webView) [self scheduleWebViewRecovery:nil];
+}
+
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    BOOL recovered = self.webRecoveryInProgress;
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(recoverWebView) object:nil];
+    self.webRecoveryScheduled = NO;
+    self.webRecoveryInProgress = NO;
+    if (recovered) [self setStatusOK:YES message:@"页面已恢复"];
     NSString *script = @"(function(){fetch('/api/devices/mac/heartbeat',{method:'POST'}).catch(()=>{});if(window.__copySyncMac)return;window.__copySyncMac=true;let checking=false;let check=async()=>{if(checking)return;checking=true;try{const r=await fetch('/api/transfers?device=mac',{cache:'no-store'}),d=await r.json();for(const t of d.transfers){window.webkit.messageHandlers.copySync.postMessage({type:'incoming',id:t.id,item_id:t.item_id,name:t.name||'新内容',kind:t.kind,mime:t.mime||'',size:t.size||0});if(t.kind==='text')await fetch('/api/deliveries/'+t.id+'/ack',{method:'POST',body:new URLSearchParams({status:'delivered'})})}}catch(e){}finally{checking=false}};let es=new EventSource('/api/events');es.addEventListener('items',check);es.onopen=check;check()})()";
     [webView evaluateJavaScript:script completionHandler:nil];
 }

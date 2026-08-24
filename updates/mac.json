@@ -1,7 +1,7 @@
 {
-  "version": "2.0",
-  "build": 34,
+  "version": "2.2",
+  "build": 35,
   "url": "https://copy-direct.example.com/updates/CopySync-Mac-latest.zip",
-  "sha256": "957cf1935803324245df388761430dd0b885e01e886ec68ccd61cc646e734478",
-  "notes": "修复录屏权限死循环：改用固定自签名证书，更新后权限不再失效；收件箱新增右上角刷新按钮；「粘贴文本」改走原生剪贴板，「选文件/选照片」可正常弹出选择器；移除侧栏「设备」；历史悬浮贴内容不超高时自动隐藏滚动条；临时网盘「续期/复制/下载/删除」按钮等高对齐，窄屏与 Android 错位修复。"
+  "sha256": "7f782a58b184ef428e3b93b2cacc86b30f07985087d49a96828ec53bd35ce133",
+  "notes": "增加 macOS WKWebView 内容进程终止与导航失败后的自动恢复，保留登录态和原生消息桥。"
 }
