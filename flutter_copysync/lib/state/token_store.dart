@@ -9,7 +9,12 @@ abstract class TokenStore {
 
 /// 生产实现：iOS Keychain / Android Keystore / macOS Keychain。
 class SecureTokenStore implements TokenStore {
-  static const _storage = FlutterSecureStorage();
+  // useDataProtectionKeyChain: false —— 数据保护钥匙串要求 keychain-access-groups
+  // 权限（需正式签名），本地开发/未签名构建会抛 PlatformException(-34018)。
+  // 阶段 5 签名定案时再评估恢复。
+  static const _storage = FlutterSecureStorage(
+    mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+  );
   static const _key = 'copysync_v1_token';
 
   @override
