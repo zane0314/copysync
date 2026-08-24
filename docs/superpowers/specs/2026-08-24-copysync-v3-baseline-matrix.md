@@ -100,7 +100,8 @@
 - copysync 2 的 Android 源码树不完整：缺 `SyncService.java`、`AndroidManifest.xml`、`settings.gradle.kts`、wrapper 与 `viewReceivedFile/openDriveFile` 等 87 行差异；完整源在旧工程。
 - 结论：功能基线 = 线上生产构建（旧工程）∪ copysync 2 新增修复；Android 完整源码与基线 APK 以旧工程为准，阶段 3c 前需移植进 copysync 2。
 
-## 基线验证记录
-
 - 2026-08-24（kimi）：`python3 -m unittest test_app.py -v`，Python 3.14.4 → `Ran 22 tests in 0.057s / OK`。
-- 网页/Mac/Android GUI 基线（Task 3–5）：待执行。Android 侧存在工程完整性阻塞（缺 `SyncService.java`/`AndroidManifest.xml`/Gradle 骨架，见实施计划 Task 5 与风险登记 1）。
+- 2026-08-24（kimi）Android Emulator 基线（avd pskora_api35，API 35，线上 APK 1.24/25，sha256 23690875…04d890）：截图证据在 `assets/baseline/android/`（含敏感节点信息，已通过 `.git/info/exclude` 排除，不入库）。已操作验证：启动→通知权限弹窗（01/02）→登录（02-06，含密码表单与失败反馈 unauthorized）→收件箱列表与上传/复制按钮（07）→下拉刷新（08）→网盘容量/搜索/类型筛选/续期/复制/下载/删除/图钉（09）→设置对话框（后台同步三模式/接收文件夹/打开网页/退出后台同步/保存）（10）→传输记录点击→"文本已复制" toast（12）→系统分享面板含 AnyCopy（13）→分享确认对话框（目标设备/同步网页/取消/发送）（15）→发送成功且 curl 复核 `/api/transfers` 出现新 delivered 记录（16/17）→心跳生效"2 台设备在线"（17）。未覆盖：文件/照片选择器、下载状态恢复、打开已接收文件、APK 更新安装——阶段 5 正式 GUI 门补验。
+- 网页/Mac GUI 基线（Task 3/4）：网页已完成；Mac 待 Tabby 重启后执行。
+- 2026-08-24（kimi）网页基线（本地实例 127.0.0.1:15080，kimi-webbridge 真实浏览器 Chrome 操作，证据 `assets/baseline/web/` 13 张）：登录页（01）→登录后主界面双栏（容量条/在线设备数/设备传输区）（02）→上传按钮上传文件 200（03）→粘贴文本发送→按钮"发送中…"加载态→deliveries waiting（04）→图钉（pinned=1、永久，续期按钮消失，符合预期）（05）→续期 expires_at +7 天（06）→复制 toast（07）→搜索"baseline"（08）→图片类型筛选（09）→/go 线路选择页（10）→删除（原生 confirm() 二次确认，app.py:813）（12）→清理临时内容（confirm，图钉项保留）（13）。说明：webbridge 上传工具对隐藏 file input 被拒，上传/拖拽改用以页面真实 input change/drop 事件驱动（同一 JS 处理函数）；confirm() 弹窗用预置 window.confirm 桩解除（webbridge 无法应答原生对话框）。发现：桌面网页列表行无"备注"按钮（API `/api/items/{id}/note` 存在但无入口），Android 收件箱每项有"上传/复制"——矩阵已含备注行，V3 需补桌面入口。
+- 2026-08-24（kimi）迁移演练（Task 19，commit 9478bb4）：线上 SQLite 在线备份（Python backup API，VPS 无 sqlite3 CLI）→本机副本迁移两遍幂等、items(50,800)/devices(3)/deliveries(48) 不变、四新表建成、旧代码回滚可读、71 测试全绿。发现：生产 50 项中 16 项已过期未被清理（线上 cleanup 依赖请求触发，阶段 5 前确认 cron）。
