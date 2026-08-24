@@ -391,6 +391,7 @@ class V1Case(unittest.TestCase):
             conn.execute("delete from device_tokens where device_id not in ('mac','android','web')")
             conn.execute("delete from devices where id not in ('mac','android','web')")
             conn.execute("delete from sync_changes")
+            conn.execute("delete from idempotency_keys")
             conn.execute("delete from login_failures")
 
     def raw_request_full(self, method, path, body=None, headers=None):
@@ -656,6 +657,60 @@ class V1Case(unittest.TestCase):
         s, b = self.raw_get("/api/v1/events")
         self.assertEqual(s, 401)
         self.assertEqual(b["error"]["code"], "unauthorized")
+
+    def test_idempotent_rename_returns_first_result(self):
+        token, dev = self.login_device("IdemDev", "mac")
+        headers = {**self.auth(token), "Idempotency-Key": "k-rename-1"}
+        s1, b1 = self.raw_patch(f"/api/v1/devices/{dev['id']}", {"name": "NameA"}, headers=headers)
+        s2, b2 = self.raw_patch(f"/api/v1/devices/{dev['id']}", {"name": "NameB"}, headers=headers)
+        self.assertEqual(s1, 200)
+        self.assertEqual(s2, 200)
+        self.assertEqual(b1, b2)
+        with app.db() as conn:
+            name = conn.execute("select name from devices where id=?", (dev["id"],)).fetchone()[0]
+        self.assertEqual(name, "NameA")  # 第二次未真正执行
+
+    def test_idempotent_replay_sets_header(self):
+        token, dev = self.login_device("IdemHeader", "mac")
+        headers = {**self.auth(token), "Idempotency-Key": "k-header-1"}
+        self.raw_patch(f"/api/v1/devices/{dev['id']}", {"name": "H1"}, headers=headers)
+        s, h, b = self.raw_request_full("PATCH", f"/api/v1/devices/{dev['id']}", body={"name": "H2"}, headers=headers)
+        self.assertEqual(s, 200)
+        self.assertEqual(h.get("X-Idempotent-Replay"), "1")
+        self.assertEqual(b["device"]["name"], "H1")
+
+    def test_idempotent_delete_replays_result(self):
+        token_a, _ = self.login_device("IdemAdmin", "mac")
+        token_v, dev_v = self.login_device("IdemVictim", "android")
+        headers = {**self.auth(token_a), "Idempotency-Key": "k-delete-1"}
+        s1, b1 = self.raw_delete(f"/api/v1/devices/{dev_v['id']}", headers=headers)
+        s2, b2 = self.raw_delete(f"/api/v1/devices/{dev_v['id']}", headers=headers)
+        self.assertEqual(s1, 200)
+        self.assertEqual(s2, 200)  # 重放首个结果而不是 409
+        self.assertEqual(b1, b2)
+
+    def test_idempotency_scoped_per_device(self):
+        token_a, dev_a = self.login_device("IdemA", "mac")
+        token_b, dev_b = self.login_device("IdemB", "mac")
+        key = {"Idempotency-Key": "k-shared"}
+        s1, b1 = self.raw_patch(f"/api/v1/devices/{dev_a['id']}", {"name": "NameA"}, headers={**self.auth(token_a), **key})
+        s2, b2 = self.raw_patch(f"/api/v1/devices/{dev_b['id']}", {"name": "NameB"}, headers={**self.auth(token_b), **key})
+        self.assertEqual(b1["device"]["name"], "NameA")
+        self.assertEqual(b2["device"]["name"], "NameB")  # 另一设备同 key 不复用
+
+    def test_idempotency_expired_key_executes_again(self):
+        token, dev = self.login_device("IdemExpired", "mac")
+        with app.db() as conn:
+            conn.execute(
+                "insert into idempotency_keys(device_id, idem_key, result_json, created_at, expires_at) values(?,?,?,?,?)",
+                (dev["id"], "k-expired", json.dumps({"device": {"name": "Stale"}}), "2000-01-01T00:00:00Z", "2000-01-02T00:00:00Z"),
+            )
+        s, b = self.raw_patch(
+            f"/api/v1/devices/{dev['id']}", {"name": "Fresh"},
+            headers={**self.auth(token), "Idempotency-Key": "k-expired"},
+        )
+        self.assertEqual(s, 200)
+        self.assertEqual(b["device"]["name"], "Fresh")
 
     def test_v1_error_shape(self):
         status, body = self.raw_get("/api/v1/devices")

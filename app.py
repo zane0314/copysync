@@ -906,6 +906,24 @@ def record_change(conn, entity, entity_id, op):
     )
 
 
+def idem_replay(conn, device_id, key):
+    row = conn.execute(
+        "select result_json from idempotency_keys where device_id=? and idem_key=? and expires_at > ?",
+        (device_id, key, now_iso()),
+    ).fetchone()
+    return json.loads(row["result_json"]) if row else None
+
+
+def idem_store(conn, device_id, key, result):
+    expires = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 24 * 3600))
+    conn.execute(
+        "insert into idempotency_keys(device_id, idem_key, result_json, created_at, expires_at) values(?,?,?,?,?) "
+        "on conflict(device_id, idem_key) do update set result_json=excluded.result_json, "
+        "created_at=excluded.created_at, expires_at=excluded.expires_at",
+        (device_id, key, json.dumps(result, ensure_ascii=False), now_iso(), expires),
+    )
+
+
 def init():
     if not SESSION_SECRET:
         raise SystemExit("Set WEBCLIP_SESSION_SECRET first.")
@@ -1708,11 +1726,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"devices": devices})
 
     def v1_rename_device(self, device_id):
-        self.require_v1_device()
+        device = self.require_v1_device()
         name = str(self.read_json().get("name", "")).strip()
         if not name:
             self.api_fail(400, "bad_request", "设备名不能为空")
+        idem_key = self.headers.get("idempotency-key", "").strip()
         with db() as conn:
+            if idem_key:
+                cached = idem_replay(conn, device["id"], idem_key)
+                if cached is not None:
+                    self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                    return
             target = conn.execute("select id, platform, enabled from devices where id=?", (device_id,)).fetchone()
             if not target:
                 self.api_fail(404, "device_not_found", "设备不存在")
@@ -1720,11 +1744,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.api_fail(409, "device_revoked", "设备已撤销")
             conn.execute("update devices set name=? where id=?", (name, device_id))
             record_change(conn, "device", device_id, "upsert")
-        self.send_json({"device": {"id": device_id, "name": name, "platform": target["platform"]}})
+            result = {"device": {"id": device_id, "name": name, "platform": target["platform"]}}
+            if idem_key:
+                idem_store(conn, device["id"], idem_key, result)
+        self.send_json(result)
 
     def v1_delete_device(self, device_id):
-        self.require_v1_device()
+        device = self.require_v1_device()
+        idem_key = self.headers.get("idempotency-key", "").strip()
         with db() as conn:
+            if idem_key:
+                cached = idem_replay(conn, device["id"], idem_key)
+                if cached is not None:
+                    self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                    return
             target = conn.execute("select id, enabled from devices where id=?", (device_id,)).fetchone()
             if not target:
                 self.api_fail(404, "device_not_found", "设备不存在")
@@ -1735,19 +1768,30 @@ class Handler(BaseHTTPRequestHandler):
                 "update device_tokens set revoked_at=? where device_id=? and revoked_at is null",
                 (now_iso(), device_id),
             )
-            revoked = cursor.rowcount
             record_change(conn, "device", device_id, "delete")
-        self.send_json({"ok": True, "revoked_tokens": revoked})
+            result = {"ok": True, "revoked_tokens": cursor.rowcount}
+            if idem_key:
+                idem_store(conn, device["id"], idem_key, result)
+        self.send_json(result)
 
     def v1_heartbeat(self, device_id):
         device = self.require_v1_device()
         if device["id"] != device_id:
             self.api_fail(403, "device_mismatch", "心跳设备与登录设备不一致")
+        idem_key = self.headers.get("idempotency-key", "").strip()
         now = int(time.time())
         with db() as conn:
+            if idem_key:
+                cached = idem_replay(conn, device["id"], idem_key)
+                if cached is not None:
+                    self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                    return
             conn.execute("update devices set last_seen_at=? where id=?", (now, device_id))
             record_change(conn, "device", device_id, "upsert")
-        self.send_json({"ok": True})
+            result = {"ok": True}
+            if idem_key:
+                idem_store(conn, device["id"], idem_key, result)
+        self.send_json(result)
 
     def v1_sync(self):
         self.require_v1_device()
