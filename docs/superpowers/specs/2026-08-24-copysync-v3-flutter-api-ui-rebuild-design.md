@@ -298,3 +298,41 @@ Android Emulator 是强制 GUI 门，但不能证明 Samsung 等 OEM 的后台�
 - Mac 与 APK 已发布新版，网页和服务端已切换；
 - 线上登录、发送、收件、图片粘贴和更新链路再次实测通过；
 - 剩余限制和风险已明确记录，且不存在阻止发布的问题。
+
+## 16. 技能使用页
+
+本节约束 Kimi 与 Codex 在 CopySync V3 中使用技能的时机。技能用于提高执行可靠性，不能覆盖本文设计、扩大权限或替代真实验证。
+
+| 阶段或情形 | 必须使用的技能 | 作用与限制 |
+|---|---|---|
+| 开始、恢复、交接和每个验证检查点 | `project-handoff` | 先读 `.ai/HANDOFF.md`，再核对 Git、文件、测试和运行状态；实际证据优先于交接摘要 |
+| 用户要求改变已批准需求、架构、范围或行为 | `brainstorming` | 重新确认设计并获得批准；普通实现细节不借此扩大范围 |
+| 已批准设计进入实施前 | `writing-plans` | 把本文拆为可执行、可验证的纵向阶段；计划必须包含功能零回退矩阵和发布门 |
+| 实现任何功能、修复或行为变化 | `test-driven-development` | 先写能正确失败的最小测试，再实现；不能用事后补测试冒充 TDD |
+| Flutter Mac/Android UI、状态和平台集成 | `flutter-expert` | 约束共享 Flutter 代码与平台差异；不得以 Flutter 为由重写已验证原生能力 |
+| 测试失败、功能异常或 GUI 与数据不一致 | `systematic-debugging` | 先定位根因和共同调用路径，再做最小修复；禁止凭猜测大改或重装 |
+| 网页自动化验证 | `webapp-testing` | 验证本地网页、浏览器日志、上传、拖拽和交互；自动化结果不能替代 GUI 模拟手动操作 |
+| 网页真实 GUI 操作与截图 | `browser:control-in-app-browser` | 在真实页面逐按钮操作并留存证据；不得只读 DOM 或只调用 API |
+| Mac App 与 Android Emulator GUI 操作 | `computer-use` | 操作正式构建、系统菜单、快捷键、权限、模拟触摸、分享和更新；编译成功不能替代操作结果 |
+| 准备声明修复、阶段完成或测试通过 | `verification-before-completion` | 运行新鲜、完整的验证命令并读取实际结果；旧日志和代理报告不是证据 |
+| 阶段完成、发布候选、推送前、推送后和最终完成 | `copysync-v3-completion-gate` | 读取本文并检查全部适用门；任一项失败或无证据必须输出“未完成” |
+
+### 16.1 推荐调用顺序
+
+```text
+project-handoff
+→ writing-plans
+→ test-driven-development + flutter-expert
+→ systematic-debugging（出现异常时）
+→ webapp-testing / browser / computer-use
+→ verification-before-completion
+→ copysync-v3-completion-gate
+```
+
+若实现中改变需求或设计，在修改代码前插入 `brainstorming` 并重新获得 Zane 批准。
+
+### 16.2 完成门的使用边界
+
+`copysync-v3-completion-gate` 只约束 V3，并以本文为唯一权威。它自动适用于 API、数据迁移、Flutter、原生桥接、网页、图片链路、UI、构建、更新和部署工作，但不适用于未来尚未设计的 V4。
+
+完成门不执行发布、不替代 Zane 的 go/no-go，也不把自动测试、HTTP 200、编译成功或静态截图视为 GUI 和真机证据。
