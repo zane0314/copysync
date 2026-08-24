@@ -102,6 +102,20 @@ void main() {
     expect(req.headers.value('idempotency-key'), 'k-1');
   });
 
+  test('带 JSON 请求体的请求必须带 Content-Length（Python http.server 不支持 chunked）',
+      () async {
+    final client = ApiClient(baseUrl);
+    await client.login(
+        password: 'dev-pw-123', deviceName: 'Kimi Mac', platform: 'mac');
+    final loginReq = server.received.last;
+    expect(loginReq.headers.value('transfer-encoding'), isNull);
+    expect(int.parse(loginReq.headers.value('content-length')!), greaterThan(0));
+    await client.createTextItem('你好', idempotencyKey: 'k-1');
+    final postReq = server.received.last;
+    expect(postReq.headers.value('transfer-encoding'), isNull);
+    expect(int.parse(postReq.headers.value('content-length')!), greaterThan(0));
+  });
+
   test('同一幂等键重发返回第一次结果且不重复创建', () async {
     final client = ApiClient(baseUrl);
     await client.login(

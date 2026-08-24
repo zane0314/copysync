@@ -222,7 +222,10 @@ class ApiClient {
       headers?.forEach(request.headers.set);
       if (jsonBody != null) {
         request.headers.contentType = ContentType.json;
-        request.write(jsonEncode(jsonBody));
+        final encoded = utf8.encode(jsonEncode(jsonBody));
+        // Python http.server 不支持 chunked 请求体，必须显式 Content-Length。
+        request.contentLength = encoded.length;
+        request.add(encoded);
       }
       final response = await request.close();
       final raw = await utf8.decoder.bind(response).join();
