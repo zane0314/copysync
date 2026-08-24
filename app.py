@@ -65,6 +65,7 @@ TEMP_LIMIT_BYTES = int(os.environ.get("WEBCLIP_TEMP_LIMIT_BYTES", str(2 * 1024 *
 DISK_HIGH_WATER = float(os.environ.get("WEBCLIP_DISK_HIGH_WATER", "0.80"))
 ITEM_EVENTS = threading.Condition()
 ITEMS_VERSION = 0
+SYNC_KEEP = 10000
 CONNECT_SOURCES = " ".join(
     dict.fromkeys(
         [
@@ -894,6 +895,17 @@ def now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def record_change(conn, entity, entity_id, op):
+    conn.execute(
+        "insert into sync_changes(entity, entity_id, op, created_at) values(?,?,?,?)",
+        (entity, entity_id, op, now_iso()),
+    )
+    conn.execute(
+        "delete from sync_changes where seq < (select max(seq) from sync_changes) - ?",
+        (SYNC_KEEP,),
+    )
+
+
 def init():
     if not SESSION_SECRET:
         raise SystemExit("Set WEBCLIP_SESSION_SECRET first.")
@@ -1563,6 +1575,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.v1_logout()
         if path == "/api/v1/devices" and method == "GET":
             return self.v1_list_devices()
+        if path == "/api/v1/sync" and method == "GET":
+            return self.v1_sync()
         if path.startswith("/api/v1/devices/"):
             rest = urllib.parse.unquote(path[len("/api/v1/devices/"):])
             if rest.endswith("/heartbeat") and method == "POST":
@@ -1653,11 +1667,7 @@ class Handler(BaseHTTPRequestHandler):
                         (device_id, name, platform, now),
                     )
                 token = issue_device_token(conn, device_id)
-                # Task 11 统一抽 record_change
-                conn.execute(
-                    "insert into sync_changes(entity, entity_id, op, created_at) values(?,?,?,?)",
-                    ("device", device_id, "upsert", now_iso()),
-                )
+                record_change(conn, "device", device_id, "upsert")
             else:
                 conn.execute(
                     "insert into login_failures(ip,count,updated_at) values(?,?,?) "
@@ -1707,10 +1717,7 @@ class Handler(BaseHTTPRequestHandler):
             if not target["enabled"]:
                 self.api_fail(409, "device_revoked", "设备已撤销")
             conn.execute("update devices set name=? where id=?", (name, device_id))
-            conn.execute(
-                "insert into sync_changes(entity, entity_id, op, created_at) values(?,?,?,?)",
-                ("device", device_id, "upsert", now_iso()),
-            )
+            record_change(conn, "device", device_id, "upsert")
         self.send_json({"device": {"id": device_id, "name": name, "platform": target["platform"]}})
 
     def v1_delete_device(self, device_id):
@@ -1727,10 +1734,7 @@ class Handler(BaseHTTPRequestHandler):
                 (now_iso(), device_id),
             )
             revoked = cursor.rowcount
-            conn.execute(
-                "insert into sync_changes(entity, entity_id, op, created_at) values(?,?,?,?)",
-                ("device", device_id, "delete", now_iso()),
-            )
+            record_change(conn, "device", device_id, "delete")
         self.send_json({"ok": True, "revoked_tokens": revoked})
 
     def v1_heartbeat(self, device_id):
@@ -1740,11 +1744,31 @@ class Handler(BaseHTTPRequestHandler):
         now = int(time.time())
         with db() as conn:
             conn.execute("update devices set last_seen_at=? where id=?", (now, device_id))
-            conn.execute(
-                "insert into sync_changes(entity, entity_id, op, created_at) values(?,?,?,?)",
-                ("device", device_id, "upsert", now_iso()),
-            )
+            record_change(conn, "device", device_id, "upsert")
         self.send_json({"ok": True})
+
+    def v1_sync(self):
+        self.require_v1_device()
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        raw_cursor = query.get("cursor", [""])[0]
+        try:
+            cursor = int(raw_cursor)
+        except ValueError:
+            self.api_fail(409, "full_sync_required", "游标无效，请从 cursor=0 全量同步")
+        if cursor < 0:
+            self.api_fail(409, "full_sync_required", "游标无效，请从 cursor=0 全量同步")
+        with db() as conn:
+            min_seq = conn.execute("select min(seq) from sync_changes").fetchone()[0]
+            if cursor > 0 and min_seq is not None and cursor < min_seq:
+                self.api_fail(409, "full_sync_required", "游标早于保留窗口，请从 cursor=0 全量同步")
+            rows = conn.execute(
+                "select seq, entity, entity_id, op, created_at from sync_changes where seq > ? order by seq",
+                (cursor,),
+            ).fetchall()
+        changes = [dict(row) for row in rows]
+        tombstones = [{"entity": row["entity"], "entity_id": row["entity_id"]} for row in rows if row["op"] == "delete"]
+        next_cursor = rows[-1]["seq"] if rows else cursor
+        self.send_json({"changes": changes, "tombstones": tombstones, "next_cursor": next_cursor})
 
     def read_body(self, limit=MAX_FILE_BYTES + 1024 * 1024):
         try:

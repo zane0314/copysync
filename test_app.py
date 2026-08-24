@@ -580,6 +580,64 @@ class V1Case(unittest.TestCase):
         s, b = self.raw_patch(f"/api/v1/devices/{dev['id']}", {"name": "  "}, headers=self.auth(token))
         self.assertEqual(s, 400)
 
+    def test_sync_full_from_zero_and_incremental(self):
+        token, dev = self.login_device("SyncMac", "mac")
+        s, b = self.raw_get("/api/v1/sync?cursor=0", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        self.assertTrue(any(c["entity"] == "device" and c["entity_id"] == dev["id"] for c in b["changes"]))
+        cursor = b["next_cursor"]
+        self.raw_patch(f"/api/v1/devices/{dev['id']}", {"name": "SyncMac2"}, headers=self.auth(token))
+        s, b = self.raw_get(f"/api/v1/sync?cursor={cursor}", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        self.assertEqual(len(b["changes"]), 1)  # 只增量
+        self.assertEqual(b["changes"][0]["op"], "upsert")
+        self.assertEqual(b["changes"][0]["entity"], "device")
+        self.assertGreater(b["next_cursor"], cursor)
+
+    def test_sync_bad_cursor_requires_full(self):
+        token, _ = self.login_device("SyncBad", "mac")
+        for bad in ("abc", "-1"):
+            s, b = self.raw_get(f"/api/v1/sync?cursor={bad}", headers=self.auth(token))
+            self.assertEqual(s, 409)
+            self.assertEqual(b["error"]["code"], "full_sync_required")
+        s, b = self.raw_get("/api/v1/sync", headers=self.auth(token))
+        self.assertEqual(s, 409)
+        self.assertEqual(b["error"]["code"], "full_sync_required")
+
+    def test_sync_tombstone_on_delete(self):
+        token_v, dev_v = self.login_device("SyncVictim", "android")
+        token_a, _ = self.login_device("SyncAdmin", "mac")
+        s, b = self.raw_get("/api/v1/sync?cursor=0", headers=self.auth(token_a))
+        cursor = b["next_cursor"]
+        self.raw_delete(f"/api/v1/devices/{dev_v['id']}", headers=self.auth(token_a))
+        s, b = self.raw_get(f"/api/v1/sync?cursor={cursor}", headers=self.auth(token_a))
+        self.assertEqual(s, 200)
+        self.assertTrue(any(c["op"] == "delete" and c["entity_id"] == dev_v["id"] for c in b["changes"]))
+        self.assertIn({"entity": "device", "entity_id": dev_v["id"]}, b["tombstones"])
+
+    def test_sync_requires_auth(self):
+        s, b = self.raw_get("/api/v1/sync?cursor=0")
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "unauthorized")
+
+    def test_sync_prunes_window_and_stale_cursor_requires_full(self):
+        token, dev = self.login_device("SyncPrune", "mac")
+        old_keep = app.SYNC_KEEP
+        app.SYNC_KEEP = 5
+        try:
+            with app.db() as conn:
+                for i in range(10):
+                    app.record_change(conn, "item", f"prune-{i}", "upsert")
+                count = conn.execute("select count(*) from sync_changes").fetchone()[0]
+                min_seq = conn.execute("select min(seq) from sync_changes").fetchone()[0]
+        finally:
+            app.SYNC_KEEP = old_keep
+        self.assertLessEqual(count, 6)  # 窗口 5 + 登录产生的 1 条之外被裁剪
+        s, b = self.raw_get("/api/v1/sync?cursor=1", headers=self.auth(token))
+        if min_seq > 1:
+            self.assertEqual(s, 409)
+            self.assertEqual(b["error"]["code"], "full_sync_required")
+
     def test_v1_error_shape(self):
         status, body = self.raw_get("/api/v1/devices")
         self.assertEqual(status, 401)
