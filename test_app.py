@@ -1036,6 +1036,73 @@ class V1Case(unittest.TestCase):
         self.assertEqual(s, 200)
         self.assertFalse((app.FILES_DIR / stored).exists())
 
+    def test_v1_delivery_targets_existing_device(self):
+        token_src, dev_src = self.login_device("SrcMac", "mac")
+        token_dst, dev_dst = self.login_device("DstAndroid", "android")
+        item = self.v1_post_text(token_src, "directed")
+        s, b = self.raw_post(
+            f"/api/v1/items/{item['id']}/deliveries", {"target_device": dev_dst["id"]}, headers=self.auth(token_src)
+        )
+        self.assertEqual(s, 200)
+        delivery = b["delivery"]
+        self.assertEqual(delivery["item_id"], item["id"])
+        self.assertEqual(delivery["source_device"], dev_src["id"])  # 恒为 token 设备
+        self.assertEqual(delivery["target_device"], dev_dst["id"])
+        self.assertEqual(delivery["status"], "waiting")
+        with app.db() as conn:
+            change = conn.execute(
+                "select * from sync_changes where entity='delivery' and entity_id=?", (delivery["id"],)
+            ).fetchone()
+        self.assertIsNotNone(change)
+        s, b = self.raw_post(
+            f"/api/v1/items/{item['id']}/deliveries", {"target_device": "no-such-device"}, headers=self.auth(token_src)
+        )
+        self.assertEqual(s, 404)
+        self.assertEqual(b["error"]["code"], "device_not_found")
+        s, b = self.raw_post(
+            "/api/v1/items/no-such-item/deliveries", {"target_device": dev_dst["id"]}, headers=self.auth(token_src)
+        )
+        self.assertEqual(s, 404)
+        self.assertEqual(b["error"]["code"], "item_not_found")
+
+    def test_v1_delivery_rejects_revoked_device(self):
+        token_src, dev_src = self.login_device("RevSrc", "mac")
+        token_v, dev_v = self.login_device("RevVictim", "android")
+        self.raw_delete(f"/api/v1/devices/{dev_v['id']}", headers=self.auth(token_src))
+        item = self.v1_post_text(token_src, "to revoked")
+        s, b = self.raw_post(
+            f"/api/v1/items/{item['id']}/deliveries", {"target_device": dev_v["id"]}, headers=self.auth(token_src)
+        )
+        self.assertEqual(s, 409)
+        self.assertEqual(b["error"]["code"], "device_revoked")
+
+    def test_v1_ack_only_target_device(self):
+        token_src, dev_src = self.login_device("AckSrc", "mac")
+        token_dst, dev_dst = self.login_device("AckDst", "android")
+        item = self.v1_post_text(token_src, "ack me")
+        s, b = self.raw_post(
+            f"/api/v1/items/{item['id']}/deliveries", {"target_device": dev_dst["id"]}, headers=self.auth(token_src)
+        )
+        delivery_id = b["delivery"]["id"]
+        s, b = self.raw_post(f"/api/v1/deliveries/{delivery_id}/ack", {"status": "downloaded"}, headers=self.auth(token_src))
+        self.assertEqual(s, 403)  # 发送方不能确认
+        self.assertEqual(b["error"]["code"], "device_mismatch")
+        s, b = self.raw_post(f"/api/v1/deliveries/{delivery_id}/ack", {"status": "delivered"}, headers=self.auth(token_dst))
+        self.assertEqual(s, 200)
+        self.assertEqual(b["delivery"]["status"], "waiting")  # android delivered 降级语义保持
+        s, b = self.raw_post(f"/api/v1/deliveries/{delivery_id}/ack", {"status": "downloaded"}, headers=self.auth(token_dst))
+        self.assertEqual(s, 200)
+        self.assertEqual(b["delivery"]["status"], "downloaded")
+        with app.db() as conn:
+            status = conn.execute("select status from deliveries where id=?", (delivery_id,)).fetchone()[0]
+            changes = conn.execute(
+                "select count(*) from sync_changes where entity='delivery' and entity_id=?", (delivery_id,)
+            ).fetchone()[0]
+        self.assertEqual(status, "downloaded")
+        self.assertGreaterEqual(changes, 2)  # 投递 + ack 都进 sync
+        s, b = self.raw_post("/api/v1/deliveries/no-such/ack", {"status": "downloaded"}, headers=self.auth(token_dst))
+        self.assertEqual(s, 404)
+
     def test_v1_error_shape(self):
         status, body = self.raw_get("/api/v1/devices")
         self.assertEqual(status, 401)

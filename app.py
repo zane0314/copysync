@@ -1618,6 +1618,8 @@ class Handler(BaseHTTPRequestHandler):
             rest = urllib.parse.unquote(path[len("/api/v1/items/"):])
             if rest.endswith("/content") and method == "GET":
                 return self.v1_item_content(rest[:-len("/content")])
+            if rest.endswith("/deliveries") and method == "POST":
+                return self.v1_create_delivery(rest[:-len("/deliveries")])
             if "/" not in rest:
                 if method == "GET":
                     return self.v1_get_item(rest)
@@ -1625,6 +1627,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.v1_patch_item(rest)
                 if method == "DELETE":
                     return self.v1_delete_item(rest)
+        if path.startswith("/api/v1/deliveries/"):
+            rest = urllib.parse.unquote(path[len("/api/v1/deliveries/"):])
+            if rest.endswith("/ack") and method == "POST":
+                return self.v1_ack_delivery(rest[:-len("/ack")])
         if path == "/api/v1/events" and method == "GET":
             return self.v1_events()
         if path.startswith("/api/v1/devices/"):
@@ -2112,6 +2118,64 @@ class Handler(BaseHTTPRequestHandler):
                 idem_store(conn, device["id"], idem_key, result)
         for stored in files:  # 事务提交后删文件；残留由 cleanup 兜底
             unlink_file(stored)
+        notify_items_changed()
+        self.send_json(result)
+
+    def v1_create_delivery(self, item_id):
+        device = self.require_v1_device()
+        fields = self.read_json()
+        target = str(fields.get("target_device", ""))[:64]
+        if not target:
+            self.api_fail(400, "bad_request", "缺少 target_device")
+        idem_key = self.headers.get("idempotency-key", "").strip()
+        with db() as conn:
+            if idem_key:
+                cached = idem_replay(conn, device["id"], idem_key)
+                if cached is not None:
+                    self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                    return
+            if not conn.execute("select id from items where id=?", (item_id,)).fetchone():
+                self.api_fail(404, "item_not_found", "项目不存在")
+            target_row = conn.execute("select id, enabled from devices where id=?", (target,)).fetchone()
+            if not target_row:
+                self.api_fail(404, "device_not_found", "目标设备不存在")
+            if not target_row["enabled"]:
+                self.api_fail(409, "device_revoked", "目标设备已撤销")
+            delivery_id = create_delivery(conn, item_id, device["id"], target)
+            record_change(conn, "delivery", delivery_id, "upsert")
+            row = conn.execute("select * from deliveries where id=?", (delivery_id,)).fetchone()
+            result = {"delivery": dict(row)}
+            if idem_key:
+                idem_store(conn, device["id"], idem_key, result)
+        notify_items_changed()
+        self.send_json(result)
+
+    def v1_ack_delivery(self, delivery_id):
+        device = self.require_v1_device()
+        status = str(self.read_json().get("status", "delivered"))
+        if status not in {"waiting", "delivered", "downloaded", "copied", "failed"}:
+            self.api_fail(400, "bad_request", "非法状态")
+        idem_key = self.headers.get("idempotency-key", "").strip()
+        with db() as conn:
+            if idem_key:
+                cached = idem_replay(conn, device["id"], idem_key)
+                if cached is not None:
+                    self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                    return
+            delivery = conn.execute("select * from deliveries where id=?", (delivery_id,)).fetchone()
+            if not delivery:
+                self.api_fail(404, "delivery_not_found", "投递不存在")
+            if delivery["target_device"] != device["id"]:
+                self.api_fail(403, "device_mismatch", "只能由目标设备确认")
+            target = conn.execute("select platform from devices where id=?", (delivery["target_device"],)).fetchone()
+            if target and target["platform"] == "android" and status == "delivered":
+                status = "waiting"  # android 需手动接收，delivered 降级为 waiting
+            conn.execute("update deliveries set status=?, updated_at=? where id=?", (status, int(time.time()), delivery_id))
+            record_change(conn, "delivery", delivery_id, "upsert")
+            row = conn.execute("select * from deliveries where id=?", (delivery_id,)).fetchone()
+            result = {"delivery": dict(row)}
+            if idem_key:
+                idem_store(conn, device["id"], idem_key, result)
         notify_items_changed()
         self.send_json(result)
 
