@@ -1290,6 +1290,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
+            if self.path.startswith("/api/v1/"):
+                return self.route_v1()
             cleanup()
             path = urllib.parse.urlparse(self.path).path
             host = self.headers.get("host", "").split(":", 1)[0].lower()
@@ -1366,6 +1368,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            if self.path.startswith("/api/v1/"):
+                return self.route_v1()
             cleanup()
             path = urllib.parse.urlparse(self.path).path
             if path == "/api/login":
@@ -1426,6 +1430,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         try:
+            if self.path.startswith("/api/v1/"):
+                return self.route_v1()
             path = urllib.parse.urlparse(self.path).path
             if path.startswith("/api/items/"):
                 self.require_auth()
@@ -1435,6 +1441,52 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(404)
         except AbortRequest:
             pass
+
+    def do_PATCH(self):
+        try:
+            if self.path.startswith("/api/v1/"):
+                return self.route_v1()
+            self.send_error(404)
+        except AbortRequest:
+            pass
+
+    def route_v1(self):
+        path = urllib.parse.urlsplit(self.path).path
+        if path == "/api/v1/devices" and self.command == "GET":
+            if not self.v1_device():
+                self.api_fail(401, "unauthorized", "需要登录")
+            with db() as conn:
+                rows = conn.execute(
+                    "select id, name, platform, last_seen_at, enabled from devices order by id"
+                ).fetchall()
+            self.send_json({"devices": [dict(row) for row in rows]})
+            return
+        self.api_fail(404, "not_found", "接口不存在")
+
+    def v1_device(self):
+        token = None
+        auth = self.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[len("Bearer "):].strip()
+        elif self.headers.get("cookie"):
+            jar = cookies.SimpleCookie()
+            try:
+                jar.load(self.headers.get("cookie"))
+            except cookies.CookieError:
+                jar = {}
+            if "webclip_v1" in jar:
+                token = jar["webclip_v1"].value
+        if not token:
+            return None
+        try:
+            with db() as conn:
+                return conn.execute(
+                    "select d.* from device_tokens t join devices d on d.id = t.device_id "
+                    "where t.token_hash = ? and t.revoked_at is null and d.enabled = 1",
+                    (hashlib.sha256(token.encode()).hexdigest(),),
+                ).fetchone()
+        except sqlite3.OperationalError:
+            return None  # device_tokens 表由 migrate_v1 创建
 
     def read_body(self, limit=MAX_FILE_BYTES + 1024 * 1024):
         try:
@@ -1819,11 +1871,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_json(self, data, headers=None):
-        self.send(200, json_bytes(data), "application/json; charset=utf-8", headers)
+    def send_json(self, data, headers=None, status=200):
+        self.send(status, json_bytes(data), "application/json; charset=utf-8", headers)
 
     def fail(self, code, message):
         self.send(code, json_bytes({"error": message}), "application/json; charset=utf-8")
+        raise AbortRequest(message)
+
+    def api_fail(self, status, code, message, details=None):
+        err = {"code": code, "message": message}
+        if details is not None:
+            err["details"] = details
+        self.send_json({"error": err}, status=status)
         raise AbortRequest(message)
 
     def log_message(self, fmt, *args):

@@ -1,7 +1,11 @@
+import http.client
+import json
 import os
 import tempfile
+import threading
 import time
 import unittest
+from http.server import ThreadingHTTPServer
 
 
 tmp = tempfile.TemporaryDirectory()
@@ -358,6 +362,53 @@ class WebClipboardTest(unittest.TestCase):
             conn.execute("delete from items where text in ('drive-note','transfer-note')")
         self.assertEqual(rows["drive-note"], 7 * 86400)
         self.assertEqual(rows["transfer-note"], 86400)
+
+
+class QuietHandler(app.Handler):
+    def log_message(self, *args):
+        pass
+
+
+class V1Case(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        app.init()
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join()
+
+    def raw_request(self, method, path, body=None, headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        payload = None
+        merged = dict(headers or {})
+        if body is not None:
+            payload = json.dumps(body).encode()
+            merged.setdefault("Content-Type", "application/json")
+        conn.request(method, path, body=payload, headers=merged)
+        resp = conn.getresponse()
+        raw = resp.read()
+        conn.close()
+        return resp.status, json.loads(raw.decode())
+
+    def raw_get(self, path, headers=None):
+        return self.raw_request("GET", path, headers=headers)
+
+    def test_v1_error_shape(self):
+        status, body = self.raw_get("/api/v1/devices")
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"]["code"], "unauthorized")
+        self.assertIn("message", body["error"])
+
+    def test_v1_unknown_route_404_not_found(self):
+        status, body = self.raw_get("/api/v1/nope")
+        self.assertEqual(status, 404)
+        self.assertEqual(body["error"]["code"], "not_found")
 
 
 if __name__ == "__main__":
