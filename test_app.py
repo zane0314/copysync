@@ -638,6 +638,25 @@ class V1Case(unittest.TestCase):
             self.assertEqual(s, 409)
             self.assertEqual(b["error"]["code"], "full_sync_required")
 
+    def test_v1_events_streams_version_notification(self):
+        token, _ = self.login_device("EventsMac", "mac")
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        try:
+            conn.request("GET", "/api/v1/events", headers=self.auth(token))
+            resp = conn.getresponse()
+            self.assertEqual(resp.status, 200)
+            self.assertIn("text/event-stream", resp.getheader("Content-Type"))
+            chunk = resp.read1(256).decode()
+            self.assertIn("data:", chunk)  # 首包即含版本号
+            self.assertNotIn("<html", chunk)  # 不带旧 HTML
+        finally:
+            conn.close()
+
+    def test_v1_events_requires_auth(self):
+        s, b = self.raw_get("/api/v1/events")
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "unauthorized")
+
     def test_v1_error_shape(self):
         status, body = self.raw_get("/api/v1/devices")
         self.assertEqual(status, 401)

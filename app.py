@@ -1577,6 +1577,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.v1_list_devices()
         if path == "/api/v1/sync" and method == "GET":
             return self.v1_sync()
+        if path == "/api/v1/events" and method == "GET":
+            return self.v1_events()
         if path.startswith("/api/v1/devices/"):
             rest = urllib.parse.unquote(path[len("/api/v1/devices/"):])
             if rest.endswith("/heartbeat") and method == "POST":
@@ -1769,6 +1771,27 @@ class Handler(BaseHTTPRequestHandler):
         tombstones = [{"entity": row["entity"], "entity_id": row["entity_id"]} for row in rows if row["op"] == "delete"]
         next_cursor = rows[-1]["seq"] if rows else cursor
         self.send_json({"changes": changes, "tombstones": tombstones, "next_cursor": next_cursor})
+
+    def v1_events(self):
+        self.require_v1_device()
+        version = ITEMS_VERSION
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        try:
+            self.wfile.write(f"retry: 2000\nevent: sync\ndata: {version}\n\n".encode())
+            self.wfile.flush()
+            while True:
+                with ITEM_EVENTS:
+                    changed = ITEM_EVENTS.wait_for(lambda: ITEMS_VERSION != version, timeout=20)
+                    version = ITEMS_VERSION
+                message = f"event: sync\ndata: {version}\n\n".encode() if changed else b": keepalive\n\n"
+                self.wfile.write(message)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def read_body(self, limit=MAX_FILE_BYTES + 1024 * 1024):
         try:
