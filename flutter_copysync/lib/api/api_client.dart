@@ -1,5 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 /// v1 API 错误信封对应的异常（code 稳定、message 可直接显示）。
 class ApiException implements Exception {
@@ -98,6 +102,7 @@ class Item {
     required this.sourceDevice,
     required this.targetDevice,
     this.name = '',
+    this.mime = '',
     this.size = 0,
     this.createdAt = 0,
     this.expiresAt = 0,
@@ -108,6 +113,7 @@ class Item {
         kind: json['kind'] as String? ?? '',
         text: json['text'] as String? ?? '',
         name: json['name'] as String? ?? '',
+        mime: json['mime'] as String? ?? '',
         size: (json['size'] as num?)?.toInt() ?? 0,
         createdAt: (json['created_at'] as num?)?.toInt() ?? 0,
         expiresAt: (json['expires_at'] as num?)?.toInt() ?? 0,
@@ -119,6 +125,7 @@ class Item {
   final String kind;
   final String text;
   final String name;
+  final String mime;
   final int size;
   final int createdAt;
   final int expiresAt;
@@ -135,6 +142,8 @@ class ApiClient {
 
   /// 登录成功后持有的设备 Token；也允许从安全存储恢复后注入。
   String? token;
+
+  final _boundaryRandom = Random();
 
   Future<LoginResult> login({
     required String password,
@@ -206,6 +215,136 @@ class ApiClient {
     return Item.fromJson(body['item'] as Map<String, Object?>);
   }
 
+  /// 上传文件/图片（multipart/form-data）；图片可同时带 clipboard_variant。
+  /// [path] 为本地文件路径，文件名取路径最后一段；MIME 按扩展名推断，
+  /// 服务端按 MIME 决定 kind（image/* → image，否则 file）。
+  Future<Item> uploadFile(
+    String path, {
+    String? clipboardVariantPath,
+    String? targetDevice,
+    String? idemKey,
+    String? note,
+  }) async {
+    final file = File(path);
+    final bytes = await file.readAsBytes();
+    final name = _basename(path);
+    List<int>? variantBytes;
+    String? variantName;
+    if (clipboardVariantPath != null && clipboardVariantPath.isNotEmpty) {
+      variantBytes = await File(clipboardVariantPath).readAsBytes();
+      variantName = _basename(clipboardVariantPath);
+    }
+    final boundary =
+        '----copysync${DateTime.now().microsecondsSinceEpoch}${_boundaryRandom.nextInt(1 << 32)}';
+    final body = _encodeMultipart(
+      boundary,
+      fields: {
+        if (note != null && note.isNotEmpty) 'note': note,
+        if (targetDevice != null && targetDevice.isNotEmpty)
+          'target_device': targetDevice,
+      },
+      files: [
+        (name: 'file', filename: name, bytes: bytes),
+        if (variantBytes != null)
+          (name: 'clipboard_variant', filename: variantName!, bytes: variantBytes),
+      ],
+    );
+    final client = HttpClient();
+    try {
+      final request = await client.openUrl(
+          'POST', Uri.parse('$baseUrl/api/v1/items'));
+      if (token != null) {
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
+      if (idemKey != null && idemKey.isNotEmpty) {
+        request.headers.set('Idempotency-Key', idemKey);
+      }
+      request.headers.contentType = ContentType('multipart', 'form-data',
+          parameters: {'boundary': boundary});
+      // Python http.server 不支持 chunked 请求体，必须显式 Content-Length。
+      request.contentLength = body.length;
+      request.add(body);
+      final response = await request.close();
+      final decoded = await _decodeResponse(response);
+      return Item.fromJson(decoded['item'] as Map<String, Object?>);
+    } on SocketException catch (e) {
+      throw ApiException(0, 'network_error', '无法连接服务器：${e.message}');
+    } on HttpException catch (e) {
+      throw ApiException(0, 'network_error', '网络错误：${e.message}');
+    } finally {
+      client.close();
+    }
+  }
+
+  /// 下载项目内容字节；[variant] 为 original（默认）或 clipboard。
+  Future<Uint8List> downloadContent(String id, {String variant = 'original'}) async {
+    final client = HttpClient();
+    try {
+      final request = await client.openUrl('GET',
+          Uri.parse('$baseUrl/api/v1/items/$id/content?variant=$variant'));
+      if (token != null) {
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
+      final response = await request.close();
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return await consolidateHttpClientResponseBytes(response);
+      }
+      await _decodeResponse(response); // 非 2xx 一律抛 ApiException
+      throw StateError('unreachable');
+    } on SocketException catch (e) {
+      throw ApiException(0, 'network_error', '无法连接服务器：${e.message}');
+    } on HttpException catch (e) {
+      throw ApiException(0, 'network_error', '网络错误：${e.message}');
+    } finally {
+      client.close();
+    }
+  }
+
+  static String _basename(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    return normalized.split('/').last;
+  }
+
+  static String _mimeOf(String filename) {
+    final ext = filename.split('.').last.toLowerCase();
+    const mimes = {
+      'png': 'image/png',
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'heic': 'image/heic',
+      'txt': 'text/plain',
+      'pdf': 'application/pdf',
+      'zip': 'application/zip',
+    };
+    return mimes[ext] ?? 'application/octet-stream';
+  }
+
+  static Uint8List _encodeMultipart(
+    String boundary, {
+    Map<String, String> fields = const {},
+    List<({String name, String filename, List<int> bytes})> files = const [],
+  }) {
+    final builder = BytesBuilder();
+    for (final entry in fields.entries) {
+      builder.add(utf8.encode('--$boundary\r\n'
+          'Content-Disposition: form-data; name="${entry.key}"\r\n'
+          '\r\n'
+          '${entry.value}\r\n'));
+    }
+    for (final file in files) {
+      builder.add(utf8.encode('--$boundary\r\n'
+          'Content-Disposition: form-data; name="${file.name}"; filename="${file.filename}"\r\n'
+          'Content-Type: ${_mimeOf(file.filename)}\r\n'
+          '\r\n'));
+      builder.add(file.bytes);
+      builder.add(utf8.encode('\r\n'));
+    }
+    builder.add(utf8.encode('--$boundary--\r\n'));
+    return builder.toBytes();
+  }
+
   Future<Map<String, Object?>> _request(
     String method,
     String path, {
@@ -228,26 +367,7 @@ class ApiClient {
         request.add(encoded);
       }
       final response = await request.close();
-      final raw = await utf8.decoder.bind(response).join();
-      Object? decoded;
-      try {
-        decoded = raw.isEmpty ? null : jsonDecode(raw);
-      } on FormatException {
-        decoded = null;
-      }
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return (decoded as Map?)?.cast<String, Object?>() ?? {};
-      }
-      final error = (decoded as Map?)?['error'];
-      if (error is Map) {
-        throw ApiException(
-          response.statusCode,
-          error['code'] as String? ?? 'unknown',
-          error['message'] as String? ?? '请求失败',
-          details: error['details'],
-        );
-      }
-      throw ApiException(response.statusCode, 'http_error', '请求失败（HTTP ${response.statusCode}）');
+      return await _decodeResponse(response);
     } on SocketException catch (e) {
       throw ApiException(0, 'network_error', '无法连接服务器：${e.message}');
     } on HttpException catch (e) {
@@ -255,5 +375,29 @@ class ApiClient {
     } finally {
       client.close();
     }
+  }
+
+  /// 读取响应：2xx 解析 JSON map；否则把错误信封映射为 ApiException。
+  Future<Map<String, Object?>> _decodeResponse(HttpClientResponse response) async {
+    final raw = await utf8.decoder.bind(response).join();
+    Object? decoded;
+    try {
+      decoded = raw.isEmpty ? null : jsonDecode(raw);
+    } on FormatException {
+      decoded = null;
+    }
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return (decoded as Map?)?.cast<String, Object?>() ?? {};
+    }
+    final error = (decoded as Map?)?['error'];
+    if (error is Map) {
+      throw ApiException(
+        response.statusCode,
+        error['code'] as String? ?? 'unknown',
+        error['message'] as String? ?? '请求失败',
+        details: error['details'],
+      );
+    }
+    throw ApiException(response.statusCode, 'http_error', '请求失败（HTTP ${response.statusCode}）');
   }
 }

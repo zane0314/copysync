@@ -163,4 +163,87 @@ void main() {
       expect(find.text('阶段 4 实现'), findsOneWidget);
     });
   });
+
+  group('文件/图片发送', () {
+    late Directory tempDir;
+
+    /// 1x1 透明 PNG。
+    final pngBytes = [
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+      0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+      0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
+      0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x60, 0x00, 0x02, 0x00,
+      0x00, 0x05, 0x00, 0x01, 0x7A, 0x5E, 0xAB, 0x3F, 0x00, 0x00, 0x00, 0x00,
+      0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('copysync_test');
+    });
+
+    tearDown(() async {
+      await tempDir.delete(recursive: true);
+    });
+
+    testWidgets('收件箱显示发送文件与发送图片入口', (tester) async {
+      await tester.runAsync(() async {
+        await pumpApp(tester);
+        await loginThroughUi(tester);
+        expect(find.byKey(const Key('sendFileButton')), findsOneWidget);
+        expect(find.byKey(const Key('sendImageButton')), findsOneWidget);
+      });
+    });
+
+    testWidgets('image 条目先显示预览占位，加载完成后显示图片', (tester) async {
+      await tester.runAsync(() async {
+        await pumpApp(tester);
+        await loginThroughUi(tester);
+        final path = '${tempDir.path}/pic.png';
+        await File(path).writeAsBytes(pngBytes);
+        await state.sendImage(path);
+        await tester.pump();
+        expect(find.byKey(const Key('imagePreviewPlaceholder')), findsOneWidget);
+        // 预览字节下载完成后替换为真实图片。
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await tester.pump();
+        expect(find.byKey(const Key('imagePreview')), findsOneWidget);
+        expect(find.text('pic.png'), findsOneWidget);
+      });
+    });
+
+    testWidgets('file 条目显示图标、文件名与大小', (tester) async {
+      await tester.runAsync(() async {
+        await pumpApp(tester);
+        await loginThroughUi(tester);
+        final path = '${tempDir.path}/报告.txt';
+        await File(path).writeAsBytes(List.filled(2048, 65));
+        await state.sendFile(path);
+        await tester.pump();
+        expect(find.text('报告.txt'), findsOneWidget);
+        expect(find.textContaining('2.0 KB'), findsOneWidget);
+        expect(find.byIcon(Icons.insert_drive_file_outlined), findsOneWidget);
+      });
+    });
+
+    testWidgets('发送中所有发送入口禁用（防重复点击）', (tester) async {
+      await tester.runAsync(() async {
+        await pumpApp(tester);
+        await loginThroughUi(tester);
+        server.itemDelay = const Duration(milliseconds: 300);
+        final sending = state.sendText('hi'); // 同步置 loading
+        await tester.pump();
+        for (final key in const [
+          Key('sendButton'),
+          Key('sendFileButton'),
+          Key('sendImageButton'),
+        ]) {
+          final button = tester.widget<ElevatedButton>(find.byKey(key));
+          expect(button.onPressed, isNull, reason: '$key 应在 loading 时禁用');
+        }
+        await sending;
+        await tester.pump();
+      });
+    });
+  });
 }

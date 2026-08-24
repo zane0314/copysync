@@ -36,6 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   # 锁定 9.x：10+/11 要求 compileSdk 37，超过本工程 AGP 支持的 android-36。
   flutter_secure_storage: 9.2.4
+  # 系统文件选择器（macOS/Android 均支持，Android 走 SAF 无需额外权限）。
+  file_selector: ^1.0.3
 
 dev_dependencies:
   flutter_test:

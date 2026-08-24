@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -114,7 +115,50 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// 增量同步 + 设备列表；游标失效时回退 cursor=0 全量。
+  /// 发送文件；失败保留幂等键，重试复用同一键。
+  Future<bool> sendFile(String path, {String? targetDevice}) =>
+      _sendUpload(path, targetDevice: targetDevice);
+
+  /// 发送图片；同一图片文件同时作为 clipboard 变体上传
+  ///（原生剪贴板格式转换为后续桥接任务）。
+  Future<bool> sendImage(String path, {String? targetDevice}) =>
+      _sendUpload(path, clipboardVariantPath: path, targetDevice: targetDevice);
+
+  Future<bool> _sendUpload(
+    String path, {
+    String? clipboardVariantPath,
+    String? targetDevice,
+  }) async {
+    if (sendStatus == OpStatus.loading) return false;
+    if (!File(path).existsSync()) {
+      sendStatus = OpStatus.error;
+      sendError = '文件不存在：$path';
+      notifyListeners();
+      return false;
+    }
+    sendStatus = OpStatus.loading;
+    sendError = null;
+    notifyListeners();
+    _pendingIdemKey ??= _newIdemKey();
+    try {
+      final item = await api.uploadFile(
+        path,
+        clipboardVariantPath: clipboardVariantPath,
+        targetDevice: targetDevice,
+        idemKey: _pendingIdemKey,
+      );
+      _upsertItem(item);
+      _pendingIdemKey = null;
+      sendStatus = OpStatus.success;
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      sendStatus = OpStatus.error;
+      sendError = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
   Future<void> refresh() => _refresh(allowFullFallback: true);
 
   Future<void> _refresh({required bool allowFullFallback}) async {

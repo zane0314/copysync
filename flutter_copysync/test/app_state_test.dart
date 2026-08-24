@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:copysync/api/api_client.dart';
 import 'package:copysync/state/app_state.dart';
@@ -118,6 +121,83 @@ void main() {
       expect(ok, isFalse);
       expect(state.sendStatus, OpStatus.error);
       expect(state.sendError, '文本不能为空');
+      expect(server.received, isEmpty);
+    });
+  });
+
+  group('发送文件/图片', () {
+    late Directory tempDir;
+
+    setUp(() async {
+      await loginOk();
+      server.received.clear();
+      tempDir = await Directory.systemTemp.createTemp('copysync_test');
+    });
+
+    tearDown(() async {
+      await tempDir.delete(recursive: true);
+    });
+
+    Future<String> writeTemp(String name, List<int> bytes) async {
+      final file = File('${tempDir.path}/$name');
+      await file.writeAsBytes(bytes);
+      return file.path;
+    }
+
+    test('sendFile 成功：状态 success 且文件 item 出现在列表', () async {
+      final path = await writeTemp('报告.txt', utf8.encode('内容'));
+      final ok = await state.sendFile(path);
+      expect(ok, isTrue);
+      expect(state.sendStatus, OpStatus.success);
+      final item = state.items.single;
+      expect(item.kind, 'file');
+      expect(item.name, '报告.txt');
+    });
+
+    test('sendImage 成功：kind 为 image 且携带 clipboard_variant', () async {
+      final path = await writeTemp('pic.png', [0x89, 0x50, 1, 2]);
+      final ok = await state.sendImage(path);
+      expect(ok, isTrue);
+      expect(state.items.single.kind, 'image');
+      expect(server.lastMultipart['clipboard_variant']?.filename, 'pic.png');
+    });
+
+    test('发送中防重：第二次调用被拒且只发一次请求', () async {
+      final path = await writeTemp('a.txt', utf8.encode('a'));
+      final first = state.sendFile(path);
+      expect(state.sendStatus, OpStatus.loading);
+      final second = await state.sendFile(path);
+      expect(second, isFalse);
+      expect(await first, isTrue);
+      final posts = server.received
+          .where((r) => r.uri.path == '/api/v1/items' && r.method == 'POST')
+          .length;
+      expect(posts, 1);
+    });
+
+    test('失败保留列表与幂等键，修复后用同一幂等键重试成功', () async {
+      final path = await writeTemp('b.txt', utf8.encode('b'));
+      server.forceItemStatus = 500;
+      final ok = await state.sendFile(path);
+      expect(ok, isFalse);
+      expect(state.sendStatus, OpStatus.error);
+      expect(state.sendError, '服务器开小差了');
+      expect(state.items, isEmpty);
+      final firstKey = server.received.last.headers.value('idempotency-key');
+      expect(firstKey, isNotNull);
+
+      server.forceItemStatus = null;
+      final retry = await state.sendFile(path);
+      expect(retry, isTrue);
+      expect(server.received.last.headers.value('idempotency-key'), firstKey);
+      expect(state.items.single.name, 'b.txt');
+    });
+
+    test('文件不存在不发送请求', () async {
+      final ok = await state.sendFile('${tempDir.path}/不存在.txt');
+      expect(ok, isFalse);
+      expect(state.sendStatus, OpStatus.error);
+      expect(state.sendError, contains('文件不存在'));
       expect(server.received, isEmpty);
     });
   });

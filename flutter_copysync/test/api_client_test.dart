@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:copysync/api/api_client.dart';
 import 'fake_v1_server.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -127,5 +130,145 @@ void main() {
     final itemChanges =
         page.changes.where((c) => c.entity == 'item').toList();
     expect(itemChanges, hasLength(1));
+  });
+
+  group('uploadFile', () {
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('copysync_test');
+    });
+
+    tearDown(() async {
+      await tempDir.delete(recursive: true);
+    });
+
+    Future<String> writeTemp(String name, List<int> bytes) async {
+      final file = File('${tempDir.path}/$name');
+      await file.writeAsBytes(bytes);
+      return file.path;
+    }
+
+    test('multipart 格式正确：边界/字段/content-disposition，显式 Content-Length',
+        () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final path = await writeTemp('note.txt', utf8.encode('文件内容abc'));
+      final item = await client.uploadFile(path, idemKey: 'k-file');
+      expect(item.kind, 'file');
+      expect(item.name, 'note.txt');
+      expect(item.size, utf8.encode('文件内容abc').length);
+
+      final req = server.received.last;
+      final contentType = req.headers.contentType!;
+      expect(contentType.mimeType, 'multipart/form-data');
+      expect(contentType.parameters['boundary'], isNotEmpty);
+      // Python http.server 不支持 chunked，必须显式 Content-Length。
+      expect(req.headers.value('transfer-encoding'), isNull);
+      expect(req.headers.value('content-length'),
+          '${server.receivedBodies.last.length}');
+      expect(req.headers.value('idempotency-key'), 'k-file');
+
+      final raw = latin1.decode(server.receivedBodies.last);
+      final boundary = contentType.parameters['boundary']!;
+      expect(raw, contains('--$boundary\r\n'));
+      expect(raw,
+          contains('Content-Disposition: form-data; name="file"; filename="note.txt"'));
+      expect(raw, contains('--$boundary--'));
+      final filePart = server.lastMultipart['file']!;
+      expect(filePart.filename, 'note.txt');
+      expect(filePart.bytes, utf8.encode('文件内容abc'));
+    });
+
+    test('携带 note/target_device 表单字段与 clipboard_variant 文件', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final pngBytes = [0x89, 0x50, 0x4E, 0x47, 1, 2, 3];
+      final path = await writeTemp('pic.png', pngBytes);
+      final item = await client.uploadFile(
+        path,
+        clipboardVariantPath: path,
+        targetDevice: 'dev-9',
+        note: '备注',
+      );
+      expect(item.kind, 'image');
+      expect(item.targetDevice, 'dev-9');
+      final variant = server.lastMultipart['clipboard_variant']!;
+      expect(variant.filename, 'pic.png');
+      expect(variant.bytes, pngBytes);
+      expect(server.lastMultipart['note']!.text, '备注');
+      expect(server.lastMultipart['target_device']!.text, 'dev-9');
+    });
+
+    test('413 file_too_large 与 507 storage_full 映射为 ApiException code',
+        () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final path = await writeTemp('big.bin', [1, 2, 3]);
+      server.forceItemStatus = 413;
+      server.forceItemCode = 'file_too_large';
+      server.forceItemMessage = '超过单文件上限';
+      await expectLater(
+        () => client.uploadFile(path),
+        throwsA(isA<ApiException>()
+            .having((e) => e.status, 'status', 413)
+            .having((e) => e.code, 'code', 'file_too_large')),
+      );
+      server.forceItemStatus = 507;
+      server.forceItemCode = 'storage_full';
+      await expectLater(
+        () => client.uploadFile(path),
+        throwsA(isA<ApiException>()
+            .having((e) => e.status, 'status', 507)
+            .having((e) => e.code, 'code', 'storage_full')),
+      );
+    });
+
+    test('同一幂等键重放返回首次结果', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final path = await writeTemp('a.txt', utf8.encode('a'));
+      final first = await client.uploadFile(path, idemKey: 'k-dup-file');
+      final second = await client.uploadFile(path, idemKey: 'k-dup-file');
+      expect(second.id, first.id);
+      expect(server.itemsById, hasLength(1));
+    });
+  });
+
+  group('downloadContent', () {
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('copysync_test');
+    });
+
+    tearDown(() async {
+      await tempDir.delete(recursive: true);
+    });
+
+    test('按 variant 下载字节并携带 Bearer token', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final path = '${tempDir.path}/p.png';
+      await File(path).writeAsBytes([9, 8, 7]);
+      final item = await client.uploadFile(path, clipboardVariantPath: path);
+      final original = await client.downloadContent(item.id);
+      expect(original, [9, 8, 7]);
+      final req = server.received.last;
+      expect(req.uri.queryParameters['variant'], 'original');
+      expect(req.headers.value('authorization'), 'Bearer cps_tok_1');
+      final clipboard =
+          await client.downloadContent(item.id, variant: 'clipboard');
+      expect(clipboard, [9, 8, 7]);
+      expect(server.received.last.uri.queryParameters['variant'], 'clipboard');
+    });
+
+    test('无 clipboard 变体时抛出 404 variant_missing', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final path = '${tempDir.path}/p.png';
+      await File(path).writeAsBytes([9, 8, 7]);
+      final item = await client.uploadFile(path);
+      await expectLater(
+        () => client.downloadContent(item.id, variant: 'clipboard'),
+        throwsA(isA<ApiException>()
+            .having((e) => e.status, 'status', 404)
+            .having((e) => e.code, 'code', 'variant_missing')),
+      );
+    });
   });
 }
