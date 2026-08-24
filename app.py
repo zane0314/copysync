@@ -1618,6 +1618,13 @@ class Handler(BaseHTTPRequestHandler):
             rest = urllib.parse.unquote(path[len("/api/v1/items/"):])
             if rest.endswith("/content") and method == "GET":
                 return self.v1_item_content(rest[:-len("/content")])
+            if "/" not in rest:
+                if method == "GET":
+                    return self.v1_get_item(rest)
+                if method == "PATCH":
+                    return self.v1_patch_item(rest)
+                if method == "DELETE":
+                    return self.v1_delete_item(rest)
         if path == "/api/v1/events" and method == "GET":
             return self.v1_events()
         if path.startswith("/api/v1/devices/"):
@@ -2025,6 +2032,88 @@ class Handler(BaseHTTPRequestHandler):
         else:
             name = item["name"]
         self.send_blob(blob["mime"], name, path=path)
+
+    def v1_get_item(self, item_id):
+        self.require_v1_device()
+        with db() as conn:
+            item = conn.execute("select * from items where id=?", (item_id,)).fetchone()
+        if not item:
+            self.api_fail(404, "item_not_found", "项目不存在")
+        self.send_json({"item": item_json(item)})
+
+    def v1_patch_item(self, item_id):
+        device = self.require_v1_device()
+        fields = self.read_json()
+        idem_key = self.headers.get("idempotency-key", "").strip()
+        with db() as conn:
+            if idem_key:
+                cached = idem_replay(conn, device["id"], idem_key)
+                if cached is not None:
+                    self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                    return
+            item = conn.execute("select * from items where id=?", (item_id,)).fetchone()
+            if not item:
+                self.api_fail(404, "item_not_found", "项目不存在")
+            now = int(time.time())
+            if "pinned" in fields:
+                pin = 1 if fields["pinned"] else 0
+                if pin and not item["pinned"]:
+                    pinned, _, _ = usage()
+                    if pinned + item["size"] > PINNED_LIMIT_BYTES:
+                        self.api_fail(409, "pinned_limit", "图钉存储已达上限")
+                conn.execute("update items set pinned=? where id=?", (pin, item_id))
+                if pin:
+                    conn.execute("update items set expires_at=null where id=?", (item_id,))
+                elif "expires_at" not in fields and "ttl" not in fields:
+                    conn.execute("update items set expires_at=? where id=?", (now + DRIVE_TTL_SECONDS, item_id))
+            if "note" in fields:
+                note = str(fields["note"]).strip()
+                if len(note) > 200:
+                    self.api_fail(400, "note_too_long", "备注过长")
+                conn.execute("update items set note=? where id=?", (note, item_id))
+            if "expires_at" in fields:
+                value = fields["expires_at"]
+                if value is not None:
+                    try:
+                        value = int(value)
+                    except (TypeError, ValueError):
+                        self.api_fail(400, "bad_request", "expires_at 需为整数或 null")
+                conn.execute("update items set expires_at=? where id=?", (value, item_id))
+            elif "ttl" in fields:
+                ttl = v1_ttl(fields["ttl"], DRIVE_TTL_SECONDS)
+                conn.execute("update items set expires_at=? where id=?", (now + ttl, item_id))
+            record_change(conn, "item", item_id, "upsert")
+            result = {"item": item_json(conn.execute("select * from items where id=?", (item_id,)).fetchone())}
+            if idem_key:
+                idem_store(conn, device["id"], idem_key, result)
+        notify_items_changed()
+        self.send_json(result)
+
+    def v1_delete_item(self, item_id):
+        device = self.require_v1_device()
+        idem_key = self.headers.get("idempotency-key", "").strip()
+        with db() as conn:
+            if idem_key:
+                cached = idem_replay(conn, device["id"], idem_key)
+                if cached is not None:
+                    self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                    return
+            item = conn.execute("select id, stored_name from items where id=?", (item_id,)).fetchone()
+            if not item:
+                self.api_fail(404, "item_not_found", "项目不存在")
+            files = [row[0] for row in conn.execute("select stored_name from item_blobs where item_id=?", (item_id,))]
+            if item["stored_name"] and item["stored_name"] not in files:
+                files.append(item["stored_name"])
+            conn.execute("delete from item_blobs where item_id=?", (item_id,))
+            conn.execute("delete from items where id=?", (item_id,))
+            record_change(conn, "item", item_id, "delete")
+            result = {"ok": True, "id": item_id}
+            if idem_key:
+                idem_store(conn, device["id"], idem_key, result)
+        for stored in files:  # 事务提交后删文件；残留由 cleanup 兜底
+            unlink_file(stored)
+        notify_items_changed()
+        self.send_json(result)
 
     def send_blob(self, mime, name, data=None, path=None):
         wants_inline = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("inline") == ["1"]

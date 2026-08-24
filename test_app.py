@@ -476,6 +476,23 @@ class V1Case(unittest.TestCase):
         self.assertEqual(status, 200)
         return body["token"], body["device"]
 
+    def v1_post_text(self, token, text, fields=None):
+        payload = {"kind": "text", "text": text}
+        payload.update(fields or {})
+        s, b = self.raw_post("/api/v1/items", payload, headers=self.auth(token))
+        self.assertEqual(s, 200)
+        return b["item"]
+
+    def v1_upload(self, token, filename, data, mime, extra_parts=(), boundary="----helper"):
+        parts = [("file", filename, mime, data)] + list(extra_parts)
+        body = self.multipart_body(boundary, parts)
+        s, b = self.raw_request(
+            "POST", "/api/v1/items", body=body,
+            headers={**self.auth(token), "Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        self.assertEqual(s, 200)
+        return b["item"]
+
     def test_v1_login_issues_per_device_token(self):
         s1, b1 = self.raw_post("/api/v1/auth/login", {"password": PW, "device_name": "Task8Mac", "platform": "mac"})
         s2, b2 = self.raw_post("/api/v1/auth/login", {"password": PW, "device_name": "Task8Mac", "platform": "mac"})
@@ -938,6 +955,86 @@ class V1Case(unittest.TestCase):
     def test_v1_content_requires_auth(self):
         s, b = self.raw_get("/api/v1/items/whatever/content")
         self.assertEqual(s, 401)
+
+    def test_v1_get_item(self):
+        token, dev = self.login_device("GetMac", "mac")
+        item = self.v1_post_text(token, "get me")
+        s, b = self.raw_get(f"/api/v1/items/{item['id']}", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        self.assertEqual(b["item"]["id"], item["id"])
+        self.assertEqual(b["item"]["text"], "get me")
+        s, b = self.raw_get("/api/v1/items/no-such-item", headers=self.auth(token))
+        self.assertEqual(s, 404)
+        self.assertEqual(b["error"]["code"], "item_not_found")
+
+    def test_v1_patch_item_note_pin_expiry(self):
+        token, dev = self.login_device("PatchMac", "mac")
+        item = self.v1_post_text(token, "patch me")
+        now = int(time.time())
+        s, b = self.raw_patch(f"/api/v1/items/{item['id']}", {"note": "hello"}, headers=self.auth(token))
+        self.assertEqual(s, 200)
+        self.assertEqual(b["item"]["note"], "hello")
+        s, b = self.raw_patch(f"/api/v1/items/{item['id']}", {"pinned": True}, headers=self.auth(token))
+        self.assertEqual(b["item"]["pinned"], 1)
+        self.assertIsNone(b["item"]["expires_at"])  # 图钉不过期
+        s, b = self.raw_patch(f"/api/v1/items/{item['id']}", {"pinned": False}, headers=self.auth(token))
+        self.assertEqual(b["item"]["pinned"], 0)
+        self.assertGreaterEqual(b["item"]["expires_at"], now + 7 * 86400 - 10)  # 取消图钉回到网盘有效期
+        s, b = self.raw_patch(f"/api/v1/items/{item['id']}", {"ttl": 3600}, headers=self.auth(token))
+        self.assertLessEqual(b["item"]["expires_at"], now + 3600 + 10)
+        self.assertGreaterEqual(b["item"]["expires_at"], now + 3600 - 10)
+        with app.db() as conn:
+            changes = conn.execute(
+                "select * from sync_changes where entity='item' and entity_id=?", (item["id"],)
+            ).fetchall()
+        self.assertTrue(changes)  # patch 进 sync
+        s, b = self.raw_patch("/api/v1/items/no-such-item", {"note": "x"}, headers=self.auth(token))
+        self.assertEqual(s, 404)
+
+    def test_v1_patch_pin_limit(self):
+        token, dev = self.login_device("PinMac", "mac")
+        item = self.v1_post_text(token, "pin me please")
+        old_limit = app.PINNED_LIMIT_BYTES
+        app.PINNED_LIMIT_BYTES = 1
+        try:
+            s, b = self.raw_patch(f"/api/v1/items/{item['id']}", {"pinned": True}, headers=self.auth(token))
+            self.assertEqual(s, 409)
+            self.assertEqual(b["error"]["code"], "pinned_limit")
+        finally:
+            app.PINNED_LIMIT_BYTES = old_limit
+
+    def test_v1_delete_item_tombstone(self):
+        token, dev = self.login_device("DelMac", "mac")
+        data = b"delete me" * 10
+        item = self.v1_upload(token, "del.bin", data, "application/octet-stream")
+        s, b = self.raw_delete(f"/api/v1/items/{item['id']}", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        s, b = self.raw_get(f"/api/v1/items/{item['id']}", headers=self.auth(token))
+        self.assertEqual(s, 404)
+        s, b = self.raw_get(f"/api/v1/items/{item['id']}/content", headers=self.auth(token))
+        self.assertEqual(s, 404)
+        with app.db() as conn:
+            self.assertIsNone(conn.execute("select id from items where id=?", (item["id"],)).fetchone())
+            self.assertEqual(conn.execute("select count(*) from item_blobs where item_id=?", (item["id"],)).fetchone()[0], 0)
+            change = conn.execute(
+                "select op from sync_changes where entity='item' and entity_id=? order by seq desc", (item["id"],)
+            ).fetchone()
+        self.assertEqual(change["op"], "delete")  # 墓碑
+        s, b = self.raw_get("/api/v1/sync?cursor=0", headers=self.auth(token))
+        self.assertIn({"entity": "item", "entity_id": item["id"]}, b["tombstones"])
+        s, b = self.raw_delete(f"/api/v1/items/{item['id']}", headers=self.auth(token))
+        self.assertEqual(s, 404)  # 重复删除
+
+    def test_v1_delete_item_removes_file(self):
+        token, dev = self.login_device("DelFile", "mac")
+        data = b"file to delete" * 5
+        item = self.v1_upload(token, "gone.bin", data, "application/octet-stream")
+        with app.db() as conn:
+            stored = conn.execute("select stored_name from items where id=?", (item["id"],)).fetchone()[0]
+        self.assertTrue((app.FILES_DIR / stored).exists())
+        s, b = self.raw_delete(f"/api/v1/items/{item['id']}", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        self.assertFalse((app.FILES_DIR / stored).exists())
 
     def test_v1_error_shape(self):
         status, body = self.raw_get("/api/v1/devices")
