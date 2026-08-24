@@ -1379,6 +1379,23 @@ def usage():
     return row["p"], row["t"], disk.used / disk.total
 
 
+def item_json(row):
+    return {
+        "id": row["id"], "kind": row["kind"], "name": row["name"], "mime": row["mime"],
+        "size": row["size"], "text": row["text"], "note": row["note"], "pinned": row["pinned"],
+        "created_at": row["created_at"], "expires_at": row["expires_at"],
+        "source_device": row["source_device"], "target_device": row["target_device"],
+    }
+
+
+def v1_ttl(raw, default):
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(300, min(7 * 86400, value))
+
+
 def create_delivery(conn, item_id, source_device="web", target_device="all"):
     now = int(time.time())
     source_device = source_device or "web"
@@ -1595,6 +1612,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.v1_list_devices()
         if path == "/api/v1/sync" and method == "GET":
             return self.v1_sync()
+        if path == "/api/v1/items" and method == "POST":
+            return self.v1_create_item()
         if path == "/api/v1/events" and method == "GET":
             return self.v1_events()
         if path.startswith("/api/v1/devices/"):
@@ -1836,6 +1855,111 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def v1_create_item(self):
+        device = self.require_v1_device()
+        ctype = self.headers.get("content-type", "")
+        if ctype.startswith("application/json"):
+            return self.v1_create_text_item(device)
+        if ctype.startswith("multipart/form-data"):
+            return self.v1_create_file_item(device)
+        self.api_fail(400, "bad_request", "Content-Type 需为 application/json 或 multipart/form-data")
+
+    def v1_create_text_item(self, device):
+        fields = self.read_json()
+        if fields.get("kind", "text") != "text":
+            self.api_fail(400, "unsupported_kind", "JSON 创建仅支持文本")
+        text = str(fields.get("text", "")).strip()
+        if not text:
+            self.api_fail(400, "empty_text", "文本不能为空")
+        note = str(fields.get("note", ""))
+        target_device = str(fields.get("target_device", ""))[:64]
+        ttl = v1_ttl(fields.get("ttl"), TRANSFER_TTL_SECONDS if target_device and target_device != "web" else DRIVE_TTL_SECONDS)
+        idem_key = self.headers.get("idempotency-key", "").strip()
+        item_id = secrets.token_urlsafe(12)
+        now = int(time.time())
+        with db() as conn:
+            if idem_key:
+                cached = idem_replay(conn, device["id"], idem_key)
+                if cached is not None:
+                    self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                    return
+            conn.execute(
+                "insert into items(id,kind,name,mime,size,text,note,created_at,expires_at,source_device,target_device,web_visible) values(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (item_id, "text", "文本", "text/plain; charset=utf-8", len(text.encode()), text, note,
+                 now, now + ttl, device["id"], target_device or "all", 1),
+            )
+            if target_device:
+                create_delivery(conn, item_id, device["id"], target_device)
+            record_change(conn, "item", item_id, "upsert")
+            result = {"item": item_json(conn.execute("select * from items where id=?", (item_id,)).fetchone())}
+            if idem_key:
+                idem_store(conn, device["id"], idem_key, result)
+        notify_items_changed()
+        self.send_json(result)
+
+    def v1_create_file_item(self, device):
+        try:
+            length = int(self.headers.get("content-length", "0"))
+        except ValueError:
+            self.api_fail(400, "bad_request", "bad content length")
+        if length > MAX_UPLOAD_BYTES:
+            self.api_fail(413, "file_too_large", "请求体超过上传上限")
+        form = parse_form(self.read_body(MAX_UPLOAD_BYTES), self.headers.get("content-type", ""))
+        field = form.fields.get("file")
+        if isinstance(field, list):
+            field = field[0]
+        if not field or not field.filename:
+            self.api_fail(400, "no_file", "缺少文件字段 file")
+        raw_name = safe_filename(field.filename)
+        data = field.file.read()
+        size = len(data)
+        if size > MAX_FILE_BYTES:
+            self.api_fail(413, "file_too_large", f"{raw_name} 超过单文件上限")
+        pinned, temp, disk_used = usage()
+        if disk_used >= DISK_HIGH_WATER:
+            self.api_fail(507, "storage_full", "磁盘水位过高")
+        if temp + size > TEMP_LIMIT_BYTES:
+            self.api_fail(507, "temp_storage_full", "临时存储已达上限")
+        note = str(form.getfirst("note", ""))
+        target_device = str(form.getfirst("target_device", ""))[:64]
+        ttl = v1_ttl(form.getfirst("ttl", ""), TRANSFER_TTL_SECONDS if target_device and target_device != "web" else DRIVE_TTL_SECONDS)
+        idem_key = self.headers.get("idempotency-key", "").strip()
+        mime = mimetypes.guess_type(raw_name)[0] or "application/octet-stream"
+        kind = "image" if mime.startswith("image/") else "file"
+        item_id = secrets.token_urlsafe(12)
+        stored = secrets.token_urlsafe(24)
+        now = int(time.time())
+        try:
+            with db() as conn:
+                if idem_key:
+                    cached = idem_replay(conn, device["id"], idem_key)
+                    if cached is not None:
+                        self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                        return
+                part = FILES_DIR / f"{stored}.part"
+                part.write_bytes(data)
+                digest = sha256_file(part)
+                part.replace(FILES_DIR / stored)
+                conn.execute(
+                    "insert into items(id,kind,name,stored_name,mime,size,note,created_at,expires_at,source_device,target_device,web_visible) values(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (item_id, kind, raw_name, stored, mime, size, note, now, now + ttl, device["id"], target_device or "all", 1),
+                )
+                conn.execute(
+                    "insert into item_blobs(item_id, variant, stored_name, mime, size, sha256, created_at) values(?,?,?,?,?,?,?)",
+                    (item_id, "original", stored, mime, size, digest, now_iso()),
+                )
+                if target_device:
+                    create_delivery(conn, item_id, device["id"], target_device)
+                record_change(conn, "item", item_id, "upsert")
+                result = {"item": item_json(conn.execute("select * from items where id=?", (item_id,)).fetchone())}
+                if idem_key:
+                    idem_store(conn, device["id"], idem_key, result)
+        except Exception:
+            unlink_file(stored)
+            raise
+        notify_items_changed()
+        self.send_json(result)
 
     def read_body(self, limit=MAX_FILE_BYTES + 1024 * 1024):
         try:

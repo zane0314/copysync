@@ -386,21 +386,49 @@ class V1Case(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join()
 
+    def setUp(self):
+        self.old_high_water = app.DISK_HIGH_WATER
+        app.DISK_HIGH_WATER = 1.0  # 测试不依赖宿主机真实磁盘水位
+
     def tearDown(self):
+        app.DISK_HIGH_WATER = self.old_high_water
         with app.db() as conn:
+            rows = conn.execute(
+                "select stored_name from items where source_device not in ('mac','android','web')"
+            ).fetchall()
+            conn.execute("delete from item_blobs where item_id in (select id from items where source_device not in ('mac','android','web'))")
+            conn.execute("delete from items where source_device not in ('mac','android','web')")
             conn.execute("delete from device_tokens where device_id not in ('mac','android','web')")
             conn.execute("delete from devices where id not in ('mac','android','web')")
             conn.execute("delete from sync_changes")
             conn.execute("delete from idempotency_keys")
             conn.execute("delete from login_failures")
+        for row in rows:
+            if row["stored_name"]:
+                try:
+                    (app.FILES_DIR / row["stored_name"]).unlink()
+                except FileNotFoundError:
+                    pass
+
+    def multipart_body(self, boundary, parts):
+        out = b""
+        for name, filename, ctype, data in parts:
+            out += f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"'.encode()
+            if filename is not None:
+                out += f'; filename="{filename}"\r\nContent-Type: {ctype}'.encode()
+            out += b"\r\n\r\n" + data + b"\r\n"
+        return out + f"--{boundary}--\r\n".encode()
 
     def raw_request_full(self, method, path, body=None, headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
         payload = None
         merged = dict(headers or {})
         if body is not None:
-            payload = json.dumps(body).encode()
-            merged.setdefault("Content-Type", "application/json")
+            if isinstance(body, (bytes, bytearray)):
+                payload = bytes(body)
+            else:
+                payload = json.dumps(body).encode()
+                merged.setdefault("Content-Type", "application/json")
         conn.request(method, path, body=payload, headers=merged)
         resp = conn.getresponse()
         raw = resp.read()
@@ -711,6 +739,109 @@ class V1Case(unittest.TestCase):
         )
         self.assertEqual(s, 200)
         self.assertEqual(b["device"]["name"], "Fresh")
+
+    def test_v1_post_text_item(self):
+        token, dev = self.login_device("TextMac", "mac")
+        s, b = self.raw_post(
+            "/api/v1/items",
+            {"kind": "text", "text": "hello v1", "note": "备注", "source_device": "web"},
+            headers=self.auth(token),
+        )
+        self.assertEqual(s, 200)
+        item = b["item"]
+        self.assertEqual(item["kind"], "text")
+        self.assertEqual(item["text"], "hello v1")
+        self.assertEqual(item["note"], "备注")
+        self.assertEqual(item["source_device"], dev["id"])  # body 里的 source_device 被忽略
+        with app.db() as conn:
+            row = conn.execute("select id from items where id=?", (item["id"],)).fetchone()
+            changes = conn.execute(
+                "select * from sync_changes where entity='item' and entity_id=?", (item["id"],)
+            ).fetchall()
+        self.assertIsNotNone(row)
+        self.assertTrue(changes)
+
+    def test_v1_items_requires_auth(self):
+        s, b = self.raw_post("/api/v1/items", {"kind": "text", "text": "x"})
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "unauthorized")
+
+    def test_v1_source_device_cannot_be_forged(self):
+        token, dev = self.login_device("ForgeMac", "mac")
+        s, b = self.raw_post(
+            "/api/v1/items", {"kind": "text", "text": "forge", "source_device": "web"}, headers=self.auth(token)
+        )
+        self.assertEqual(s, 200)
+        self.assertEqual(b["item"]["source_device"], dev["id"])
+        with app.db() as conn:
+            stored = conn.execute("select source_device from items where id=?", (b["item"]["id"],)).fetchone()[0]
+        self.assertEqual(stored, dev["id"])
+
+    def test_v1_upload_file_records_original_blob(self):
+        token, dev = self.login_device("UploadMac", "mac")
+        data = b"\x89PNG\r\n\x1a\n" + b"fakepng" * 10
+        body = self.multipart_body("----t14", [("file", "pic.png", "image/png", data)])
+        s, b = self.raw_request(
+            "POST", "/api/v1/items", body=body,
+            headers={**self.auth(token), "Content-Type": "multipart/form-data; boundary=----t14"},
+        )
+        self.assertEqual(s, 200)
+        item = b["item"]
+        self.assertEqual(item["kind"], "image")
+        self.assertEqual(item["mime"], "image/png")
+        self.assertEqual(item["size"], len(data))
+        with app.db() as conn:
+            blob = conn.execute(
+                "select * from item_blobs where item_id=? and variant='original'", (item["id"],)
+            ).fetchone()
+        self.assertIsNotNone(blob)
+        self.assertEqual(blob["sha256"], hashlib.sha256(data).hexdigest())
+        self.assertEqual(blob["size"], len(data))
+        stored = blob["stored_name"]
+        self.assertEqual((app.FILES_DIR / stored).read_bytes(), data)
+        self.assertFalse((app.FILES_DIR / (stored + ".part")).exists())  # 无 .part 残留
+
+    def test_v1_upload_respects_capacity(self):
+        token, dev = self.login_device("CapMac", "mac")
+        old_limit = app.MAX_FILE_BYTES
+        app.MAX_FILE_BYTES = 10
+        try:
+            body = self.multipart_body("----t14cap", [("file", "big.bin", "application/octet-stream", b"x" * 20)])
+            s, b = self.raw_request(
+                "POST", "/api/v1/items", body=body,
+                headers={**self.auth(token), "Content-Type": "multipart/form-data; boundary=----t14cap"},
+            )
+            self.assertEqual(s, 413)
+            self.assertEqual(b["error"]["code"], "file_too_large")
+        finally:
+            app.MAX_FILE_BYTES = old_limit
+
+    def test_idempotent_create_returns_first_result(self):
+        token, dev = self.login_device("IdemItem", "mac")
+        headers = {**self.auth(token), "Idempotency-Key": "k-item-1"}
+        s1, b1 = self.raw_post("/api/v1/items", {"kind": "text", "text": "hi"}, headers=headers)
+        s2, b2 = self.raw_post("/api/v1/items", {"kind": "text", "text": "hi"}, headers=headers)
+        self.assertEqual(s1, 200)
+        self.assertEqual(b1["item"]["id"], b2["item"]["id"])
+        with app.db() as conn:
+            count = conn.execute("select count(*) from items where text='hi'").fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_v1_write_bumps_sse_version(self):
+        token, dev = self.login_device("SseMac", "mac")
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        try:
+            conn.request("GET", "/api/v1/events", headers=self.auth(token))
+            resp = conn.getresponse()
+            self.assertIn(b"data:", resp.read1(256))
+            s, b = self.raw_post("/api/v1/items", {"kind": "text", "text": "sse bump"}, headers=self.auth(token))
+            self.assertEqual(s, 200)
+            buf = b""
+            while b"event: sync" not in buf:
+                buf += resp.read1(256)
+            self.assertIn(b"data:", buf)
+        finally:
+            conn.close()
 
     def test_v1_error_shape(self):
         status, body = self.raw_get("/api/v1/devices")
