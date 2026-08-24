@@ -2,11 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- 阶段 3 开发构建：关闭沙箱以便 flutter_secure_storage 访问 Keychain
+	     （沙箱 + keychain-access-groups 需要正式签名，阶段 5 签名定案时恢复评估）。 -->
 	<key>com.apple.security.app-sandbox</key>
-	<true/>
+	<false/>
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
-	<key>com.apple.security.network.server</key>
+	<key>com.apple.security.network.client</key>
 	<true/>
+	<key>com.apple.security.network.server</key>
 </dict>
 </plist>
