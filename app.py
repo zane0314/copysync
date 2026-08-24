@@ -882,6 +882,18 @@ def db():
     return conn
 
 
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
 def init():
     if not SESSION_SECRET:
         raise SystemExit("Set WEBCLIP_SESSION_SECRET first.")
@@ -977,6 +989,63 @@ def init():
             set_setting(conn, "password_hash", PASSWORD_HASH or hash_password(PASSWORD))
         if not get_setting(conn, "session_version"):
             set_setting(conn, "session_version", "1")
+        migrate_v1(conn)
+
+
+def migrate_v1(conn):
+    conn.executescript(
+        """
+        create table if not exists device_tokens (
+          id integer primary key,
+          device_id text not null,
+          token_hash text not null unique,
+          created_at text not null,
+          last_used_at text,
+          revoked_at text
+        );
+        create table if not exists item_blobs (
+          id integer primary key,
+          item_id integer not null,
+          variant text not null,
+          stored_name text not null,
+          mime text not null default '',
+          size integer not null default 0,
+          sha256 text,
+          created_at text not null,
+          unique(item_id, variant, stored_name)
+        );
+        create table if not exists sync_changes (
+          seq integer primary key autoincrement,
+          entity text not null,
+          entity_id text not null,
+          op text not null,
+          created_at text not null
+        );
+        create index if not exists idx_sync_changes_seq on sync_changes(seq);
+        create table if not exists idempotency_keys (
+          device_id text not null,
+          idem_key text not null,
+          result_json text not null,
+          created_at text not null,
+          expires_at text not null,
+          primary key(device_id, idem_key)
+        );
+        """
+    )
+    rows = conn.execute(
+        "select i.id, i.stored_name, i.mime, i.size from items i "
+        "where i.stored_name != '' and not exists ("
+        "  select 1 from item_blobs b where b.item_id = i.id and b.variant = 'original')"
+    ).fetchall()
+    for item_id, stored, mime, size in rows:
+        path = FILES_DIR / stored
+        if not path.exists():
+            continue
+        conn.execute(
+            "insert into item_blobs(item_id, variant, stored_name, mime, size, sha256, created_at) "
+            "values (?,?,?,?,?,?,?)",
+            (item_id, "original", stored, mime, size, sha256_file(path), now_iso()),
+        )
 
 
 def sign(value):

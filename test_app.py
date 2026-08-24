@@ -1,3 +1,4 @@
+import hashlib
 import http.client
 import json
 import os
@@ -409,6 +410,45 @@ class V1Case(unittest.TestCase):
         status, body = self.raw_get("/api/v1/nope")
         self.assertEqual(status, 404)
         self.assertEqual(body["error"]["code"], "not_found")
+
+    def test_migrate_v1_creates_tables_and_is_repeatable(self):
+        with app.db() as conn:
+            app.migrate_v1(conn)
+            app.migrate_v1(conn)
+            tables = {row[0] for row in conn.execute("select name from sqlite_master where type='table'")}
+        for table in ("device_tokens", "item_blobs", "sync_changes", "idempotency_keys"):
+            self.assertIn(table, tables)
+
+    def test_migrate_v1_backfills_item_blobs_original(self):
+        data = b"copy sync blob backfill" * 100
+        stored = "migrate-backfill.bin"
+        (app.FILES_DIR / stored).write_bytes(data)
+        now = int(time.time())
+        try:
+            with app.db() as conn:
+                conn.execute(
+                    "insert into items(id,kind,name,stored_name,mime,size,created_at,expires_at) values(?,?,?,?,?,?,?,?)",
+                    ("migrate-backfill", "file", "backfill.bin", stored, "application/octet-stream", len(data), now, now + 86400),
+                )
+                app.migrate_v1(conn)
+                row = conn.execute(
+                    "select variant, stored_name, size, sha256 from item_blobs where item_id='migrate-backfill'"
+                ).fetchone()
+                self.assertIsNotNone(row)
+                self.assertEqual(row["variant"], "original")
+                self.assertEqual(row["stored_name"], stored)
+                self.assertEqual(row["size"], len(data))
+                self.assertEqual(row["sha256"], hashlib.sha256(data).hexdigest())
+                app.migrate_v1(conn)  # 二次执行不重复回填
+                count = conn.execute(
+                    "select count(*) from item_blobs where item_id='migrate-backfill'"
+                ).fetchone()[0]
+                self.assertEqual(count, 1)
+        finally:
+            with app.db() as conn:
+                conn.execute("delete from item_blobs where item_id='migrate-backfill'")
+                conn.execute("delete from items where id='migrate-backfill'")
+            (app.FILES_DIR / stored).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
