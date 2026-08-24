@@ -451,6 +451,15 @@ class V1Case(unittest.TestCase):
     def raw_post_full(self, path, body=None, headers=None):
         return self.raw_request_full("POST", path, body=body, headers=headers)
 
+    def raw_download(self, path, headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        conn.request("GET", path, headers=headers or {})
+        resp = conn.getresponse()
+        data = resp.read()
+        status, response_headers = resp.status, dict(resp.getheaders())
+        conn.close()
+        return status, response_headers, data
+
     def raw_patch(self, path, body=None, headers=None):
         return self.raw_request("PATCH", path, body=body, headers=headers)
 
@@ -842,6 +851,93 @@ class V1Case(unittest.TestCase):
             self.assertIn(b"data:", buf)
         finally:
             conn.close()
+
+    def test_clipboard_variant_stored_and_served(self):
+        token, dev = self.login_device("VariantMac", "mac")
+        gif = b"GIF89a" + b"animated" * 10
+        png = b"\x89PNG\r\n\x1a\n" + b"firstframe" * 10
+        body = self.multipart_body("----t15", [
+            ("file", "anim.gif", "image/gif", gif),
+            ("clipboard_variant", "frame.png", "image/png", png),
+        ])
+        s, b = self.raw_request(
+            "POST", "/api/v1/items", body=body,
+            headers={**self.auth(token), "Content-Type": "multipart/form-data; boundary=----t15"},
+        )
+        self.assertEqual(s, 200)
+        item_id = b["item"]["id"]
+        with app.db() as conn:
+            variants = {row["variant"]: row for row in conn.execute("select * from item_blobs where item_id=?", (item_id,))}
+        self.assertEqual(set(variants), {"original", "clipboard"})
+        self.assertEqual(variants["clipboard"]["sha256"], hashlib.sha256(png).hexdigest())
+        self.assertEqual(variants["clipboard"]["mime"], "image/png")
+        s, h, data = self.raw_download(f"/api/v1/items/{item_id}/content", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        self.assertEqual(h["Content-Type"], "image/gif")  # 默认 original
+        self.assertEqual(data, gif)
+        self.assertIn("attachment", h["Content-Disposition"])
+        s, h, data = self.raw_download(
+            f"/api/v1/items/{item_id}/content?variant=clipboard&inline=1", headers=self.auth(token)
+        )
+        self.assertEqual(s, 200)
+        self.assertEqual(h["Content-Type"], "image/png")
+        self.assertEqual(data, png)
+        self.assertIn("inline", h["Content-Disposition"])
+
+    def test_variant_missing_reports_clearly(self):
+        token, dev = self.login_device("NoVariant", "mac")
+        png = b"\x89PNG\r\n\x1a\n" + b"onlyoriginal"
+        body = self.multipart_body("----t15b", [("file", "solo.png", "image/png", png)])
+        s, b = self.raw_request(
+            "POST", "/api/v1/items", body=body,
+            headers={**self.auth(token), "Content-Type": "multipart/form-data; boundary=----t15b"},
+        )
+        self.assertEqual(s, 200)
+        item_id = b["item"]["id"]
+        s, b = self.raw_get(f"/api/v1/items/{item_id}/content?variant=clipboard", headers=self.auth(token))
+        self.assertEqual(s, 404)
+        self.assertEqual(b["error"]["code"], "variant_missing")
+        self.assertIn("PNG", b["error"]["message"])  # message 含具体格式说明
+
+    def test_variant_sha_mismatch_rejected(self):
+        token, dev = self.login_device("ShaMac", "mac")
+        gif = b"GIF89a" + b"animated"
+        png = b"\x89PNG\r\n\x1a\n" + b"frame"
+        before_files = set(os.listdir(app.FILES_DIR))
+        with app.db() as conn:
+            before_items = conn.execute("select count(*) from items").fetchone()[0]
+        body = self.multipart_body("----t15c", [
+            ("file", "anim.gif", "image/gif", gif),
+            ("clipboard_variant", "frame.png", "image/png", png),
+            ("clipboard_sha256", None, None, b"0" * 64),
+        ])
+        s, b = self.raw_request(
+            "POST", "/api/v1/items", body=body,
+            headers={**self.auth(token), "Content-Type": "multipart/form-data; boundary=----t15c"},
+        )
+        self.assertEqual(s, 400)
+        self.assertEqual(b["error"]["code"], "sha256_mismatch")
+        with app.db() as conn:
+            self.assertEqual(conn.execute("select count(*) from items").fetchone()[0], before_items)  # 不留幽灵 item
+        self.assertEqual(set(os.listdir(app.FILES_DIR)), before_files)  # 无残留文件
+
+    def test_clipboard_variant_bad_type_rejected(self):
+        token, dev = self.login_device("BadVariant", "mac")
+        png = b"\x89PNG\r\n\x1a\n" + b"data"
+        body = self.multipart_body("----t15d", [
+            ("file", "pic.png", "image/png", png),
+            ("clipboard_variant", "evil.exe", "application/octet-stream", b"MZ"),
+        ])
+        s, b = self.raw_request(
+            "POST", "/api/v1/items", body=body,
+            headers={**self.auth(token), "Content-Type": "multipart/form-data; boundary=----t15d"},
+        )
+        self.assertEqual(s, 400)
+        self.assertEqual(b["error"]["code"], "unsupported_variant_type")
+
+    def test_v1_content_requires_auth(self):
+        s, b = self.raw_get("/api/v1/items/whatever/content")
+        self.assertEqual(s, 401)
 
     def test_v1_error_shape(self):
         status, body = self.raw_get("/api/v1/devices")

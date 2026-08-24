@@ -1614,6 +1614,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.v1_sync()
         if path == "/api/v1/items" and method == "POST":
             return self.v1_create_item()
+        if path.startswith("/api/v1/items/"):
+            rest = urllib.parse.unquote(path[len("/api/v1/items/"):])
+            if rest.endswith("/content") and method == "GET":
+                return self.v1_item_content(rest[:-len("/content")])
         if path == "/api/v1/events" and method == "GET":
             return self.v1_events()
         if path.startswith("/api/v1/devices/"):
@@ -1927,8 +1931,25 @@ class Handler(BaseHTTPRequestHandler):
         idem_key = self.headers.get("idempotency-key", "").strip()
         mime = mimetypes.guess_type(raw_name)[0] or "application/octet-stream"
         kind = "image" if mime.startswith("image/") else "file"
+        variant_field = form.fields.get("clipboard_variant")
+        if isinstance(variant_field, list):
+            variant_field = variant_field[0]
+        variant_data = variant_mime = None
+        if variant_field and variant_field.filename:
+            if kind != "image":
+                self.api_fail(400, "unsupported_variant_type", "clipboard 变体仅用于图片项目")
+            variant_data = variant_field.file.read()
+            variant_mime = mimetypes.guess_type(safe_filename(variant_field.filename))[0] or "application/octet-stream"
+            if variant_mime not in ("image/png", "image/jpeg", "image/webp", "image/gif", "image/heic"):
+                self.api_fail(400, "unsupported_variant_type", "clipboard 变体仅支持 PNG/JPEG/WebP/GIF/HEIC")
+            if len(variant_data) > MAX_FILE_BYTES:
+                self.api_fail(413, "file_too_large", "clipboard 变体超过单文件上限")
+            declared = form.getfirst("clipboard_sha256", "").strip().lower()
+            if declared and declared != hashlib.sha256(variant_data).hexdigest():
+                self.api_fail(400, "sha256_mismatch", "clipboard 变体 SHA-256 与声明不一致")
         item_id = secrets.token_urlsafe(12)
         stored = secrets.token_urlsafe(24)
+        variant_stored = secrets.token_urlsafe(24) if variant_data is not None else None
         now = int(time.time())
         try:
             with db() as conn:
@@ -1941,6 +1962,11 @@ class Handler(BaseHTTPRequestHandler):
                 part.write_bytes(data)
                 digest = sha256_file(part)
                 part.replace(FILES_DIR / stored)
+                if variant_data is not None:
+                    vpart = FILES_DIR / f"{variant_stored}.part"
+                    vpart.write_bytes(variant_data)
+                    vdigest = sha256_file(vpart)
+                    vpart.replace(FILES_DIR / variant_stored)
                 conn.execute(
                     "insert into items(id,kind,name,stored_name,mime,size,note,created_at,expires_at,source_device,target_device,web_visible) values(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (item_id, kind, raw_name, stored, mime, size, note, now, now + ttl, device["id"], target_device or "all", 1),
@@ -1949,6 +1975,11 @@ class Handler(BaseHTTPRequestHandler):
                     "insert into item_blobs(item_id, variant, stored_name, mime, size, sha256, created_at) values(?,?,?,?,?,?,?)",
                     (item_id, "original", stored, mime, size, digest, now_iso()),
                 )
+                if variant_data is not None:
+                    conn.execute(
+                        "insert into item_blobs(item_id, variant, stored_name, mime, size, sha256, created_at) values(?,?,?,?,?,?,?)",
+                        (item_id, "clipboard", variant_stored, variant_mime, len(variant_data), vdigest, now_iso()),
+                    )
                 if target_device:
                     create_delivery(conn, item_id, device["id"], target_device)
                 record_change(conn, "item", item_id, "upsert")
@@ -1957,9 +1988,57 @@ class Handler(BaseHTTPRequestHandler):
                     idem_store(conn, device["id"], idem_key, result)
         except Exception:
             unlink_file(stored)
+            if variant_stored:
+                unlink_file(variant_stored)
             raise
         notify_items_changed()
         self.send_json(result)
+
+    def v1_item_content(self, item_id):
+        self.require_v1_device()
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        variant = query.get("variant", ["original"])[0]
+        if variant not in ("original", "clipboard"):
+            self.api_fail(400, "bad_variant", "variant 仅支持 original 或 clipboard")
+        with db() as conn:
+            item = conn.execute("select * from items where id=?", (item_id,)).fetchone()
+            if not item:
+                self.api_fail(404, "item_not_found", "项目不存在")
+            blob = conn.execute(
+                "select * from item_blobs where item_id=? and variant=?", (item_id, variant)
+            ).fetchone()
+        if item["kind"] == "text" and variant == "original":
+            data = item["text"].encode()
+            return self.send_blob(item["mime"], "clipboard.txt", data=data)
+        if not blob and variant == "original" and item["stored_name"]:
+            blob = {"stored_name": item["stored_name"], "mime": item["mime"]}  # 旧路由创建的项目没有 blob 行
+        if not blob:
+            if variant == "clipboard":
+                self.api_fail(404, "variant_missing", "该图片没有 clipboard 变体（应为 PNG/JPEG/WebP/GIF/HEIC 首帧）")
+            self.api_fail(404, "variant_missing", "该项目的 original 内容不存在")
+        path = FILES_DIR / blob["stored_name"]
+        if not path.exists():
+            self.api_fail(404, "content_missing", "文件已丢失")
+        if variant == "clipboard":
+            ext = mimetypes.guess_extension(blob["mime"]) or ""
+            name = Path(item["name"]).stem + ".clipboard" + ext
+        else:
+            name = item["name"]
+        self.send_blob(blob["mime"], name, path=path)
+
+    def send_blob(self, mime, name, data=None, path=None):
+        wants_inline = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("inline") == ["1"]
+        disposition = "inline" if wants_inline and mime.startswith("image/") and mime != "image/svg+xml" else "attachment"
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(data) if data is not None else path.stat().st_size))
+        self.send_header("Content-Disposition", disposition + "; filename*=UTF-8''" + urllib.parse.quote(name))
+        self.end_headers()
+        if data is not None:
+            self.wfile.write(data)
+        else:
+            with path.open("rb") as source:
+                shutil.copyfileobj(source, self.wfile, 64 * 1024)
 
     def read_body(self, limit=MAX_FILE_BYTES + 1024 * 1024):
         try:
