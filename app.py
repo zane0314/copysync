@@ -1151,6 +1151,32 @@ def clear_session_cookie():
     return morsel.output(header="").strip()
 
 
+def make_v1_cookie(token):
+    morsel = cookies.SimpleCookie()
+    morsel["webclip_v1"] = token
+    morsel["webclip_v1"]["path"] = "/"
+    morsel["webclip_v1"]["httponly"] = True
+    morsel["webclip_v1"]["max-age"] = "2592000"
+    morsel["webclip_v1"]["secure"] = True
+    morsel["webclip_v1"]["samesite"] = "Lax"
+    if COOKIE_DOMAIN:
+        morsel["webclip_v1"]["domain"] = COOKIE_DOMAIN
+    return morsel.output(header="").strip()
+
+
+def clear_v1_cookie():
+    morsel = cookies.SimpleCookie()
+    morsel["webclip_v1"] = ""
+    morsel["webclip_v1"]["path"] = "/"
+    morsel["webclip_v1"]["httponly"] = True
+    morsel["webclip_v1"]["max-age"] = "0"
+    morsel["webclip_v1"]["secure"] = True
+    morsel["webclip_v1"]["samesite"] = "Lax"
+    if COOKIE_DOMAIN:
+        morsel["webclip_v1"]["domain"] = COOKIE_DOMAIN
+    return morsel.output(header="").strip()
+
+
 def strong_enough(password):
     return len(password) >= 12
 
@@ -1640,7 +1666,10 @@ class Handler(BaseHTTPRequestHandler):
                 )
         if not ok:
             self.api_fail(401, "invalid_credentials", "密码错误")
-        self.send_json({"token": token, "device": {"id": device_id, "name": name, "platform": platform}})
+        headers = None
+        if fields.get("client") == "web" or self.headers.get("x-client") == "web":
+            headers = {"Set-Cookie": make_v1_cookie(token)}
+        self.send_json({"token": token, "device": {"id": device_id, "name": name, "platform": platform}}, headers=headers)
 
     def v1_logout(self):
         token = self.v1_token()
@@ -1650,7 +1679,7 @@ class Handler(BaseHTTPRequestHandler):
                 "update device_tokens set revoked_at=? where token_hash=? and revoked_at is null",
                 (now_iso(), hashlib.sha256(token.encode()).hexdigest()),
             )
-        self.send_json({"ok": True})
+        self.send_json({"ok": True}, headers={"Set-Cookie": clear_v1_cookie()})
 
     def v1_list_devices(self):
         self.require_v1_device()

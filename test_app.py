@@ -393,7 +393,7 @@ class V1Case(unittest.TestCase):
             conn.execute("delete from sync_changes")
             conn.execute("delete from login_failures")
 
-    def raw_request(self, method, path, body=None, headers=None):
+    def raw_request_full(self, method, path, body=None, headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
         payload = None
         merged = dict(headers or {})
@@ -403,14 +403,24 @@ class V1Case(unittest.TestCase):
         conn.request(method, path, body=payload, headers=merged)
         resp = conn.getresponse()
         raw = resp.read()
+        response_headers = {}
+        for name, value in resp.getheaders():
+            response_headers[name] = value
         conn.close()
-        return resp.status, json.loads(raw.decode())
+        return resp.status, response_headers, json.loads(raw.decode())
+
+    def raw_request(self, method, path, body=None, headers=None):
+        status, _, body = self.raw_request_full(method, path, body=body, headers=headers)
+        return status, body
 
     def raw_get(self, path, headers=None):
         return self.raw_request("GET", path, headers=headers)
 
     def raw_post(self, path, body=None, headers=None):
         return self.raw_request("POST", path, body=body, headers=headers)
+
+    def raw_post_full(self, path, body=None, headers=None):
+        return self.raw_request_full("POST", path, body=body, headers=headers)
 
     def raw_patch(self, path, body=None, headers=None):
         return self.raw_request("PATCH", path, body=body, headers=headers)
@@ -483,6 +493,42 @@ class V1Case(unittest.TestCase):
         s, b = self.raw_get("/api/v1/devices", headers=self.auth(token))
         self.assertEqual(s, 401)
         self.assertEqual(b["error"]["code"], "token_revoked")
+
+    def test_v1_web_login_sets_secure_httponly_cookie(self):
+        status, headers, body = self.raw_post_full(
+            "/api/v1/auth/login",
+            {"password": PW, "device_name": "CookieAttr", "platform": "web", "client": "web"},
+        )
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"]
+        for attr in ("webclip_v1=", "Secure", "HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=2592000"):
+            self.assertIn(attr, cookie)
+
+    def test_v1_cookie_auth_works_without_bearer(self):
+        status, headers, body = self.raw_post_full(
+            "/api/v1/auth/login",
+            {"password": PW, "device_name": "CookieWeb", "platform": "web", "client": "web"},
+        )
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        s, b = self.raw_get("/api/v1/devices", headers={"Cookie": cookie})
+        self.assertEqual(s, 200)
+        entry = next((d for d in b["devices"] if d["name"] == "CookieWeb"), None)
+        self.assertIsNotNone(entry)
+
+    def test_v1_logout_clears_cookie(self):
+        status, headers, body = self.raw_post_full(
+            "/api/v1/auth/login",
+            {"password": PW, "device_name": "LogoutWeb", "platform": "web"},
+            headers={"X-Client": "web"},
+        )
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        s, h, b = self.raw_request_full("POST", "/api/v1/auth/logout", headers={"Cookie": cookie})
+        self.assertEqual(s, 200)
+        self.assertIn("Max-Age=0", h["Set-Cookie"])
+        s, b = self.raw_get("/api/v1/devices", headers={"Cookie": cookie})
+        self.assertEqual(s, 401)
 
     def test_v1_heartbeat_path_must_match_token(self):
         token_a, dev_a = self.login_device("HeartA", "mac")
