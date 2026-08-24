@@ -19,6 +19,8 @@ os.environ.update(
 
 import app
 
+PW = "review-password-123"  # 与上方 WEBCLIP_PASSWORD 一致
+
 
 class WebClipboardTest(unittest.TestCase):
     @classmethod
@@ -384,6 +386,13 @@ class V1Case(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join()
 
+    def tearDown(self):
+        with app.db() as conn:
+            conn.execute("delete from device_tokens where device_id not in ('mac','android','web')")
+            conn.execute("delete from devices where id not in ('mac','android','web')")
+            conn.execute("delete from sync_changes")
+            conn.execute("delete from login_failures")
+
     def raw_request(self, method, path, body=None, headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
         payload = None
@@ -399,6 +408,49 @@ class V1Case(unittest.TestCase):
 
     def raw_get(self, path, headers=None):
         return self.raw_request("GET", path, headers=headers)
+
+    def raw_post(self, path, body=None, headers=None):
+        return self.raw_request("POST", path, body=body, headers=headers)
+
+    def login_device(self, name, platform):
+        status, body = self.raw_post(
+            "/api/v1/auth/login", {"password": PW, "device_name": name, "platform": platform}
+        )
+        self.assertEqual(status, 200)
+        return body["token"], body["device"]
+
+    def test_v1_login_issues_per_device_token(self):
+        s1, b1 = self.raw_post("/api/v1/auth/login", {"password": PW, "device_name": "Task8Mac", "platform": "mac"})
+        s2, b2 = self.raw_post("/api/v1/auth/login", {"password": PW, "device_name": "Task8Mac", "platform": "mac"})
+        self.assertEqual(s1, 200)
+        self.assertEqual(s2, 200)
+        self.assertNotEqual(b1["token"], b2["token"])  # 每次登录独立 token
+        self.assertEqual(b1["device"]["id"], b2["device"]["id"])  # 同名同平台复用设备
+        self.assertEqual(b1["device"]["name"], "Task8Mac")
+        self.assertTrue(b1["token"].startswith("cps_"))
+        with app.db() as conn:
+            hashes = [row[0] for row in conn.execute("select token_hash from device_tokens")]
+        self.assertNotIn(b1["token"], hashes)  # 只存哈希
+        self.assertIn(hashlib.sha256(b1["token"].encode()).hexdigest(), hashes)
+
+    def test_v1_login_wrong_password_401(self):
+        with app.db() as conn:
+            conn.execute("delete from login_failures")
+        s, b = self.raw_post("/api/v1/auth/login", {"password": "wrong-password", "device_name": "x", "platform": "mac"})
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "invalid_credentials")
+
+    def test_v1_login_rate_limited(self):
+        with app.db() as conn:
+            conn.execute("delete from login_failures")
+        for _ in range(8):
+            s, b = self.raw_post("/api/v1/auth/login", {"password": "wrong-password", "device_name": "x", "platform": "mac"})
+            self.assertEqual(s, 401)
+        s, b = self.raw_post("/api/v1/auth/login", {"password": PW, "device_name": "x", "platform": "mac"})
+        self.assertEqual(s, 429)
+        self.assertEqual(b["error"]["code"], "login_locked")
+        with app.db() as conn:
+            conn.execute("delete from login_failures")
 
     def test_v1_error_shape(self):
         status, body = self.raw_get("/api/v1/devices")

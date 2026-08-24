@@ -1098,6 +1098,15 @@ def password_ok(password):
         return False
 
 
+def issue_device_token(conn, device_id):
+    raw = "cps_" + secrets.token_urlsafe(32)
+    conn.execute(
+        "insert into device_tokens(device_id, token_hash, created_at) values(?,?,?)",
+        (device_id, hashlib.sha256(raw.encode()).hexdigest(), now_iso()),
+    )
+    return raw
+
+
 def get_setting(conn, key):
     row = conn.execute("select value from settings where key=?", (key,)).fetchone()
     return row["value"] if row else ""
@@ -1521,6 +1530,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def route_v1(self):
         path = urllib.parse.urlsplit(self.path).path
+        if path == "/api/v1/auth/login" and self.command == "POST":
+            return self.v1_login()
         if path == "/api/v1/devices" and self.command == "GET":
             if not self.v1_device():
                 self.api_fail(401, "unauthorized", "需要登录")
@@ -1556,6 +1567,57 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
         except sqlite3.OperationalError:
             return None  # device_tokens 表由 migrate_v1 创建
+
+    def read_json(self):
+        try:
+            data = json.loads(self.read_body(1024 * 32).decode())
+        except (UnicodeDecodeError, ValueError):
+            self.api_fail(400, "bad_json", "请求体不是合法 JSON")
+        if not isinstance(data, dict):
+            self.api_fail(400, "bad_json", "请求体不是合法 JSON")
+        return data
+
+    def v1_login(self):
+        ip = client_ip(self)
+        now = int(time.time())
+        ok = False
+        with db() as conn:
+            fail = conn.execute("select count, updated_at from login_failures where ip=?", (ip,)).fetchone()
+            if fail and fail["count"] >= 8 and now - fail["updated_at"] < 900:
+                self.api_fail(429, "login_locked", "尝试次数过多，请稍后再试")
+            fields = self.read_json()
+            ok = password_ok(str(fields.get("password", "")))
+            if ok:
+                conn.execute("delete from login_failures where ip=?", (ip,))
+                name = str(fields.get("device_name", "")).strip() or "未命名设备"
+                platform = str(fields.get("platform", "")).strip() or "web"
+                device = conn.execute(
+                    "select id from devices where name=? and platform=?", (name, platform)
+                ).fetchone()
+                if device:
+                    device_id = device["id"]
+                    conn.execute("update devices set last_seen_at=?, enabled=1 where id=?", (now, device_id))
+                else:
+                    device_id = secrets.token_hex(8)
+                    conn.execute(
+                        "insert into devices(id,name,platform,last_seen_at) values(?,?,?,?)",
+                        (device_id, name, platform, now),
+                    )
+                token = issue_device_token(conn, device_id)
+                # Task 11 统一抽 record_change
+                conn.execute(
+                    "insert into sync_changes(entity, entity_id, op, created_at) values(?,?,?,?)",
+                    ("device", device_id, "upsert", now_iso()),
+                )
+            else:
+                conn.execute(
+                    "insert into login_failures(ip,count,updated_at) values(?,?,?) "
+                    "on conflict(ip) do update set count=count+1, updated_at=excluded.updated_at",
+                    (ip, 1, now),
+                )
+        if not ok:
+            self.api_fail(401, "invalid_credentials", "密码错误")
+        self.send_json({"token": token, "device": {"id": device_id, "name": name, "platform": platform}})
 
     def read_body(self, limit=MAX_FILE_BYTES + 1024 * 1024):
         try:
