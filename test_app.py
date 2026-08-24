@@ -1103,6 +1103,24 @@ class V1Case(unittest.TestCase):
         s, b = self.raw_post("/api/v1/deliveries/no-such/ack", {"status": "downloaded"}, headers=self.auth(token_dst))
         self.assertEqual(s, 404)
 
+    def test_v1_usage_matches_legacy(self):
+        token, dev = self.login_device("UsageMac", "mac")
+        self.v1_post_text(token, "usage probe")
+        s, b = self.raw_get("/api/v1/usage", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        pinned, temp, disk_used = app.usage()
+        self.assertEqual(b["temp_bytes"], temp)
+        self.assertEqual(b["pinned_bytes"], pinned)
+        self.assertEqual(b["total_bytes"], pinned + temp)
+        self.assertEqual(b["limits"]["pinned"], app.PINNED_LIMIT_BYTES)
+        self.assertEqual(b["limits"]["temp"], app.TEMP_LIMIT_BYTES)
+        self.assertEqual(b["limits"]["max_file"], app.MAX_FILE_BYTES)
+
+    def test_v1_usage_requires_auth(self):
+        s, b = self.raw_get("/api/v1/usage")
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "unauthorized")
+
     def test_v1_error_shape(self):
         status, body = self.raw_get("/api/v1/devices")
         self.assertEqual(status, 401)

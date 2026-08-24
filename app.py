@@ -1612,6 +1612,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.v1_list_devices()
         if path == "/api/v1/sync" and method == "GET":
             return self.v1_sync()
+        if path == "/api/v1/usage" and method == "GET":
+            return self.v1_usage()
         if path == "/api/v1/items" and method == "POST":
             return self.v1_create_item()
         if path.startswith("/api/v1/items/"):
@@ -2046,6 +2048,16 @@ class Handler(BaseHTTPRequestHandler):
         if not item:
             self.api_fail(404, "item_not_found", "项目不存在")
         self.send_json({"item": item_json(item)})
+
+    def v1_usage(self):
+        self.require_v1_device()
+        pinned, temp, disk_used = usage()
+        self.send_json({
+            "temp_bytes": temp,
+            "pinned_bytes": pinned,
+            "total_bytes": pinned + temp,
+            "limits": {"pinned": PINNED_LIMIT_BYTES, "temp": TEMP_LIMIT_BYTES, "max_file": MAX_FILE_BYTES},
+        })
 
     def v1_patch_item(self, item_id):
         device = self.require_v1_device()
