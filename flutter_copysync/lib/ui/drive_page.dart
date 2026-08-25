@@ -97,20 +97,35 @@ class _DrivePageState extends State<DrivePage> {
                   ),
                 ),
               Expanded(
-                child: items.isEmpty
-                    ? const Center(
-                        child: Text('网盘为空',
-                            style:
-                                TextStyle(color: AppColors.textSecondary)))
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.xl),
-                        itemCount: items.length,
-                        separatorBuilder: (context, index) => const Divider(
-                            height: 1, color: AppColors.hairline),
-                        itemBuilder: (context, index) =>
-                            _tileFor(context, items[index]),
-                      ),
+                child: RefreshIndicator(
+                  key: const Key('drivePullRefresh'),
+                  onRefresh: state.refresh,
+                  child: items.isEmpty
+                      ? LayoutBuilder(
+                          builder: (context, constraints) =>
+                              SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                  minHeight: constraints.maxHeight),
+                              child: const Center(
+                                  child: Text('网盘为空',
+                                      style: TextStyle(
+                                          color: AppColors.textSecondary))),
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.xl),
+                          itemCount: items.length,
+                          separatorBuilder: (context, index) => const Divider(
+                              height: 1, color: AppColors.hairline),
+                          itemBuilder: (context, index) =>
+                              _tileFor(context, items[index]),
+                        ),
+                ),
               ),
             ],
           );

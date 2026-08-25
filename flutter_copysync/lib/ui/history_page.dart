@@ -62,23 +62,38 @@ class HistoryPage extends StatelessWidget {
               if (state.refreshStatus == OpStatus.loading)
                 const LinearProgressIndicator(),
               Expanded(
-                child: transfers.isEmpty && observed.isEmpty
-                    ? const Center(
-                        child: Text('暂无传输记录',
-                            style:
-                                TextStyle(color: AppColors.textSecondary)))
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.xl),
-                        itemCount: transfers.length + observed.length,
-                        separatorBuilder: (context, index) => const Divider(
-                            height: 1, color: AppColors.hairline),
-                        itemBuilder: (context, index) => index <
-                                transfers.length
-                            ? _transferTile(context, transfers[index])
-                            : _observedTile(
-                                context, observed.elementAt(index - transfers.length)),
-                      ),
+                child: RefreshIndicator(
+                  key: const Key('historyPullRefresh'),
+                  onRefresh: state.refresh,
+                  child: transfers.isEmpty && observed.isEmpty
+                      ? LayoutBuilder(
+                          builder: (context, constraints) =>
+                              SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                  minHeight: constraints.maxHeight),
+                              child: const Center(
+                                  child: Text('暂无传输记录',
+                                      style: TextStyle(
+                                          color: AppColors.textSecondary))),
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.xl),
+                          itemCount: transfers.length + observed.length,
+                          separatorBuilder: (context, index) => const Divider(
+                              height: 1, color: AppColors.hairline),
+                          itemBuilder: (context, index) => index <
+                                  transfers.length
+                              ? _transferTile(context, transfers[index])
+                              : _observedTile(
+                                  context, observed.elementAt(index - transfers.length)),
+                        ),
+                ),
               ),
             ],
           );

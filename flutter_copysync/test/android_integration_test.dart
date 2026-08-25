@@ -180,4 +180,32 @@ void main() {
       expect(server.itemsById, isEmpty);
     });
   });
+
+  testWidgets('下拉刷新触发 sync（RefreshIndicator → state.refresh）',
+      (tester) async {
+    await tester.runAsync(() async {
+      await login();
+      await state.refresh();
+      final syncCallsBefore = server.received
+          .where((r) => r.uri.path == '/api/v1/sync')
+          .length;
+      await pumpShell(tester, state, desktopLayout: false);
+      await tester.pump();
+      // 手势动画在 runAsync 混合时基下不可靠，直接触发 onRefresh 验证
+      // 接线（手势路径由 Emulator GUI 门覆盖）；三个页面均挂 RefreshIndicator。
+      final indicator =
+          tester.widget<RefreshIndicator>(find.byKey(const Key('pullRefresh')));
+      await indicator.onRefresh();
+      final syncCallsAfter = server.received
+          .where((r) => r.uri.path == '/api/v1/sync')
+          .length;
+      expect(syncCallsAfter, greaterThan(syncCallsBefore));
+      await tester.tap(find.byIcon(Icons.history));
+      await tester.pump();
+      expect(find.byKey(const Key('historyPullRefresh')), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.cloud_outlined));
+      await tester.pump();
+      expect(find.byKey(const Key('drivePullRefresh')), findsOneWidget);
+    });
+  });
 }

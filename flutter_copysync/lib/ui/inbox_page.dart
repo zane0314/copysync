@@ -374,17 +374,36 @@ class _InboxPageState extends State<InboxPage> {
 
   Widget _buildList() {
     if (state.items.isEmpty) {
-      return const Center(
-          child: Text('暂无内容',
-              style: TextStyle(color: AppColors.textSecondary)));
+      // 空态也可下拉刷新（旧 Android 全局下拉语义）。
+      return RefreshIndicator(
+        key: const Key('pullRefresh'),
+        onRefresh: state.refresh,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: const Center(
+                  child: Text('暂无内容',
+                      style: TextStyle(color: AppColors.textSecondary))),
+            ),
+          ),
+        ),
+      );
     }
     final items = state.items.reversed.toList();
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
-      itemCount: items.length,
-      separatorBuilder: (context, index) =>
-          const Divider(height: 1, color: AppColors.hairline),
-      itemBuilder: (context, index) => _tileFor(items[index]),
+    // 下拉刷新（旧 Android 全局下拉语义）：空态也可下拉触发 sync。
+    return RefreshIndicator(
+      key: const Key('pullRefresh'),
+      onRefresh: state.refresh,
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+        itemCount: items.length,
+        separatorBuilder: (context, index) =>
+            const Divider(height: 1, color: AppColors.hairline),
+        itemBuilder: (context, index) => _tileFor(items[index]),
+      ),
     );
   }
 
