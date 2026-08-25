@@ -21,12 +21,7 @@ class HistoryPage extends StatelessWidget {
     'failed': '失败',
   };
 
-  String _deviceName(String id) {
-    for (final d in state.devices) {
-      if (d.id == id) return d.name;
-    }
-    return id;
-  }
+  String _deviceName(String id) => state.deviceDisplayName(id);
 
   @override
   Widget build(BuildContext context) {
@@ -41,16 +36,21 @@ class HistoryPage extends StatelessWidget {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg, AppSpacing.md, AppSpacing.sm, AppSpacing.xs),
+                    AppSpacing.xl, AppSpacing.xl, AppSpacing.xl, AppSpacing.md),
                 child: Row(
                   children: [
                     Text('传输历史',
                         style: Theme.of(context).textTheme.headlineSmall),
                     const Spacer(),
-                    IconButton(
+                    ElevatedButton.icon(
                       key: const Key('historyRefreshButton'),
-                      icon: const Icon(Icons.refresh),
-                      tooltip: '刷新',
+                      icon: const Icon(Icons.refresh, size: 17),
+                      label: const Text('刷新'),
+                      style: ElevatedButton.styleFrom(
+                        elevation: 0,
+                        backgroundColor: AppColors.primarySoft,
+                        foregroundColor: AppColors.primary,
+                      ),
                       onPressed:
                           state.refreshStatus == OpStatus.loading
                               ? null
@@ -63,13 +63,21 @@ class HistoryPage extends StatelessWidget {
                 const LinearProgressIndicator(),
               Expanded(
                 child: transfers.isEmpty && observed.isEmpty
-                    ? const Center(child: Text('暂无传输记录'))
-                    : ListView(
-                        children: [
-                          for (final item in transfers)
-                            _transferTile(context, item),
-                          for (final id in observed) _observedTile(context, id),
-                        ],
+                    ? const Center(
+                        child: Text('暂无传输记录',
+                            style:
+                                TextStyle(color: AppColors.textSecondary)))
+                    : ListView.separated(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.xl),
+                        itemCount: transfers.length + observed.length,
+                        separatorBuilder: (context, index) => const Divider(
+                            height: 1, color: AppColors.hairline),
+                        itemBuilder: (context, index) => index <
+                                transfers.length
+                            ? _transferTile(context, transfers[index])
+                            : _observedTile(
+                                context, observed.elementAt(index - transfers.length)),
                       ),
               ),
             ],
@@ -100,6 +108,7 @@ class HistoryPage extends StatelessWidget {
       children: [
         ItemTile(
           item: item,
+          sourceLabel: state.deviceDisplayName(item.sourceDevice),
           statusText: [
             direction,
             if (_statusLabels[status] != null) _statusLabels[status]!,
@@ -147,15 +156,8 @@ class HistoryPage extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          margin: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.lg, vertical: AppSpacing.xs),
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.tile),
-            border: Border.all(color: AppColors.border),
-          ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm + 2),
           child: Row(
             children: [
               const Icon(Icons.swap_horiz, color: AppColors.primary),

@@ -50,7 +50,7 @@ void main() {
     // runAsync，不能嵌套，故渲染与截图在正常测试体进行。
     await tester.runAsync(() async {
       state = await loggedInState(server);
-      await state.sendText('圣何塞-1（500G CN2）trojan://d3261831-f49');
+      await state.sendText('会议纪要：周一上午十点项目同步会');
       await state.sendText('定向文本', targetDevice: 'dev-1');
       await state.sendToDevice(
           state.items.firstWhere((i) => i.text == '定向文本').id, 'dev-1');

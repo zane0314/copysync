@@ -44,6 +44,14 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// 轮询等待异步操作落地（套件并发跑时固定延时不可靠）。
+  Future<void> waitUntil(WidgetTester tester, bool Function() cond) async {
+    for (var i = 0; i < 100 && !cond(); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await tester.pump();
+    }
+  }
+
   testWidgets('空态显示网盘为空与容量信息', (tester) async {
     await tester.runAsync(() async {
       state = await loggedInState(server);
@@ -83,8 +91,7 @@ void main() {
 
       await tapMenu(tester, id, '删除');
       await tester.tap(find.byKey(const Key('confirmDeleteButton')));
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      await tester.pump();
+      await waitUntil(tester, () => server.itemsById.isEmpty);
       expect(find.text('将删除'), findsNothing);
       expect(server.itemsById, isEmpty);
       expect(find.text('网盘为空'), findsOneWidget);
@@ -98,8 +105,8 @@ void main() {
       await pumpShell(tester, state);
       await openDrive(tester);
       await tapMenu(tester, state.items.single.id, '续期 7 天');
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      await tester.pump();
+      await waitUntil(
+          tester, () => state.items.single.expiresAt == 1000000 + 7 * 86400);
       expect(state.items.single.expiresAt, 1000000 + 7 * 86400);
     });
   });
@@ -111,8 +118,7 @@ void main() {
       await pumpShell(tester, state);
       await openDrive(tester);
       await tapMenu(tester, state.items.single.id, '图钉置顶');
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      await tester.pump();
+      await waitUntil(tester, () => state.items.single.pinned);
       expect(state.items.single.pinned, isTrue);
       expect(find.textContaining('永久'), findsOneWidget);
     });

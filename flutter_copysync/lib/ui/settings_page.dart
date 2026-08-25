@@ -74,7 +74,7 @@ class _SettingsPageState extends State<SettingsPage> {
         listenable: state,
         builder: (context, _) {
           return ListView(
-            padding: const EdgeInsets.all(AppSpacing.lg),
+            padding: const EdgeInsets.all(AppSpacing.xl),
             children: [
               Text('设置', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: AppSpacing.lg),

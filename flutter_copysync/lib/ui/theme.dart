@@ -10,11 +10,25 @@ ThemeData buildAppTheme() {
     surface: AppColors.surface,
     error: AppColors.danger,
   );
+  const textTheme = TextTheme(
+    headlineSmall: TextStyle(
+      color: AppColors.ink,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.6,
+    ),
+    titleMedium: TextStyle(color: AppColors.ink, fontWeight: FontWeight.w600),
+    bodyMedium: TextStyle(color: AppColors.textPrimary),
+    bodySmall: TextStyle(color: AppColors.textSecondary),
+  );
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: AppColors.background,
     dividerColor: AppColors.border,
+    textTheme: textTheme.apply(
+      bodyColor: AppColors.textPrimary,
+      displayColor: AppColors.ink,
+    ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: AppColors.surface,
@@ -34,6 +48,11 @@ ThemeData buildAppTheme() {
           borderRadius: BorderRadius.circular(AppRadii.tile),
         ),
       ),
+    ),
+    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      backgroundColor: AppColors.glassStrong,
+      selectedItemColor: AppColors.primary,
+      unselectedItemColor: AppColors.textSecondary,
     ),
   );
 }

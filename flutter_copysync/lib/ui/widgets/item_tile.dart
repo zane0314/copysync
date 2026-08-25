@@ -46,6 +46,7 @@ class ItemTile extends StatelessWidget {
     super.key,
     required this.item,
     this.leading,
+    this.sourceLabel,
     this.statusText,
     this.primaryAction,
     this.menuItems,
@@ -55,6 +56,9 @@ class ItemTile extends StatelessWidget {
 
   /// 自定义前导（如收件箱的图片预览）；缺省为类型图标。
   final Widget? leading;
+
+  /// 来源设备显示名（缺省为 item.sourceDevice 原始 id）。
+  final String? sourceLabel;
 
   /// 追加在"来源 x"之后的状态文本（如 等待接收 / 永久）。
   final String? statusText;
@@ -69,15 +73,9 @@ class ItemTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.lg, vertical: AppSpacing.xs),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.tile),
-        border: Border.all(color: AppColors.border),
-      ),
+    // 参考图行样式：透明底、行间由页面级 hairline 分隔，操作区不被挤出。
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm + 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -91,15 +89,17 @@ class ItemTile extends StatelessWidget {
                   onTap: () => showItemDetail(context, item),
                   child: Text(
                     title,
-                    maxLines: 2,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: AppColors.textPrimary, fontSize: 14),
+                        color: AppColors.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600),
                   ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
-                  '来源 ${item.sourceDevice}'
+                  '来源 ${sourceLabel ?? item.sourceDevice}'
                   '${statusText != null && statusText!.isNotEmpty ? ' · $statusText' : ''}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

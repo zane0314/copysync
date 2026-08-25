@@ -71,6 +71,14 @@ class AppState extends ChangeNotifier {
 
   int get onlineDeviceCount => devices.where((d) => d.online).length;
 
+  /// 设备 id → 显示名（未知时回退 id 本身）。
+  String deviceDisplayName(String id) {
+    for (final d in devices) {
+      if (d.id == id) return d.name;
+    }
+    return id;
+  }
+
   Future<bool> login({
     required String password,
     required String deviceName,

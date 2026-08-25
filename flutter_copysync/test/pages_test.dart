@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:copysync/api/api_client.dart';
 import 'package:copysync/main.dart';
@@ -30,6 +31,18 @@ void main() {
   });
 
   tearDown(() => server.stop());
+
+  /// mock 系统剪贴板文本（粘贴文本 pill 的数据源）。
+  void mockClipboard(WidgetTester tester, String? text) {
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async => call.method == 'Clipboard.getData'
+          ? (text == null ? null : {'text': text})
+          : null,
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+  }
 
   Future<void> pumpApp(WidgetTester tester) async {
     await tester.pumpWidget(CopySyncApp(state: state));
@@ -72,7 +85,7 @@ void main() {
       await pumpApp(tester);
       await loginThroughUi(tester);
       expect(find.text('收件箱'), findsWidgets);
-      expect(find.text('在线设备 1'), findsOneWidget);
+      expect(find.text('1 台设备在线'), findsOneWidget);
     });
   });
 
@@ -84,33 +97,40 @@ void main() {
     });
   });
 
-  testWidgets('发送文本成功出现在列表，输入框被清空', (tester) async {
+  testWidgets('粘贴文本发送成功出现在列表', (tester) async {
     await tester.runAsync(() async {
+      mockClipboard(tester, 'V3 纵向闭环测试');
       await pumpApp(tester);
       await loginThroughUi(tester);
-      await tester.enterText(
-          find.byKey(const Key('pasteField')), 'V3 纵向闭环测试');
-      await tester.tap(find.byKey(const Key('sendButton')));
+      await tester.tap(find.byKey(const Key('pasteTextButton')));
       await Future<void>.delayed(const Duration(milliseconds: 100));
       await tester.pump();
       expect(find.text('V3 纵向闭环测试'), findsOneWidget);
-      final field = tester.widget<TextField>(find.byKey(const Key('pasteField')));
-      expect(field.controller?.text, isEmpty);
     });
   });
 
-  testWidgets('发送失败显示错误且保留输入内容', (tester) async {
+  testWidgets('剪贴板为空时粘贴给出提示，不发送', (tester) async {
     await tester.runAsync(() async {
+      mockClipboard(tester, null);
+      await pumpApp(tester);
+      await loginThroughUi(tester);
+      await tester.tap(find.byKey(const Key('pasteTextButton')));
+      await tester.pump();
+      expect(find.text('剪贴板没有可发送的文本'), findsOneWidget);
+      expect(state.items, isEmpty);
+    });
+  });
+
+  testWidgets('发送失败显示错误，数据不丢失', (tester) async {
+    await tester.runAsync(() async {
+      mockClipboard(tester, '别丢我');
       await pumpApp(tester);
       await loginThroughUi(tester);
       server.forceItemStatus = 500;
-      await tester.enterText(find.byKey(const Key('pasteField')), '别丢我');
-      await tester.tap(find.byKey(const Key('sendButton')));
+      await tester.tap(find.byKey(const Key('pasteTextButton')));
       await Future<void>.delayed(const Duration(milliseconds: 100));
       await tester.pump();
       expect(find.text('服务器开小差了'), findsOneWidget);
-      final field = tester.widget<TextField>(find.byKey(const Key('pasteField')));
-      expect(field.controller?.text, '别丢我'); // 失败保留原数据
     });
   });
 
@@ -119,9 +139,7 @@ void main() {
       await pumpApp(tester);
       await loginThroughUi(tester);
       final longText = '很长' * 200;
-      await tester.enterText(find.byKey(const Key('pasteField')), longText);
-      await tester.tap(find.byKey(const Key('sendButton')));
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await state.sendText(longText);
       await tester.pump();
       final text = tester.widget<Text>(find.text(longText));
       expect(text.overflow, TextOverflow.ellipsis);
@@ -133,9 +151,7 @@ void main() {
     await tester.runAsync(() async {
       await pumpApp(tester);
       await loginThroughUi(tester);
-      await tester.enterText(find.byKey(const Key('pasteField')), '保留我');
-      await tester.tap(find.byKey(const Key('sendButton')));
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await state.sendText('保留我');
       await tester.pump();
       expect(find.text('保留我'), findsOneWidget);
 
@@ -235,13 +251,14 @@ void main() {
 
     testWidgets('发送中所有发送入口禁用（防重复点击）', (tester) async {
       await tester.runAsync(() async {
+        mockClipboard(tester, 'hi');
         await pumpApp(tester);
         await loginThroughUi(tester);
         server.itemDelay = const Duration(milliseconds: 300);
         final sending = state.sendText('hi'); // 同步置 loading
         await tester.pump();
         for (final key in const [
-          Key('sendButton'),
+          Key('pasteTextButton'),
           Key('sendFileButton'),
           Key('sendImageButton'),
         ]) {

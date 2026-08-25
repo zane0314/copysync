@@ -1,27 +1,41 @@
 import 'package:flutter/material.dart';
 
 /// 设计 token：按 docs/superpowers/specs/assets/2026-08-24-copysync-v3-ui-reference.png
-/// （浅蓝白毛玻璃、低饱和蓝主色、中性灰文字、圆角卡片）。
+/// （蓝色环境底、白色毛玻璃面板、低饱和蓝主色、藏青文字、圆角卡片）。
 abstract final class AppColors {
   /// 主蓝（参考图高约 10% 饱和度的蓝）。
   static const primary = Color(0xFF2E7CE6);
-  static const primarySoft = Color(0xFFE8F1FD);
-  static const background = Color(0xFFF2F5FA);
+
+  /// 主蓝浅底（激活导航/徽标底）。
+  static const primarySoft = Color(0xFFDCECFD);
+
+  /// 页面蓝色环境底。
+  static const background = Color(0xFFE7EEF9);
   static const surface = Color(0xFFFFFFFF);
-  static const textPrimary = Color(0xFF1F2937);
-  static const textSecondary = Color(0xFF6B7280);
-  static const border = Color(0xFFE3E9F2);
-  static const success = Color(0xFF34A853);
+
+  /// 毛玻璃面板（半透明白 + 白色描边）。
+  static const glass = Color(0x9EFFFFFF);
+  static const glassStrong = Color(0xC7FFFFFF);
+  static const glassBorder = Color(0xCCFFFFFF);
+
+  /// 标题/品牌深藏青。
+  static const ink = Color(0xFF14264E);
+  static const textPrimary = Color(0xFF22355C);
+  static const textSecondary = Color(0xFF5B7299);
+  static const border = Color(0xFFE3EAF4);
+  static const hairline = Color(0x143C5A8C);
+  static const success = Color(0xFF34C9A3);
   static const danger = Color(0xFFE5484D);
-  static const warning = Color(0xFFF59E0B);
+  static const warning = Color(0xFFD9930D);
 
   /// 类型图标底色（低饱和区分 text/file/image）。
   static const kindText = Color(0xFF2E7CE6);
-  static const kindFile = Color(0xFF7C6FF0);
+  static const kindFile = Color(0xFF7A66FB);
   static const kindImage = Color(0xFFF59E0B);
 }
 
 abstract final class AppRadii {
+  static const panel = 18.0;
   static const card = 16.0;
   static const tile = 12.0;
   static const pill = 20.0;
@@ -41,6 +55,15 @@ abstract final class AppShadows {
       color: Color(0x0F1F2937),
       blurRadius: 12,
       offset: Offset(0, 2),
+    ),
+  ];
+
+  /// 面板浮于蓝色环境底上的柔和投影。
+  static const panel = [
+    BoxShadow(
+      color: Color(0x1A2E5DB2),
+      blurRadius: 40,
+      offset: Offset(0, 12),
     ),
   ];
 }

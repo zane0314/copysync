@@ -52,16 +52,21 @@ class _DrivePageState extends State<DrivePage> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg, AppSpacing.md, AppSpacing.sm, AppSpacing.xs),
+                    AppSpacing.xl, AppSpacing.xl, AppSpacing.xl, AppSpacing.md),
                 child: Row(
                   children: [
                     Text('临时网盘',
                         style: Theme.of(context).textTheme.headlineSmall),
                     const Spacer(),
-                    IconButton(
+                    ElevatedButton.icon(
                       key: const Key('driveRefreshButton'),
-                      icon: const Icon(Icons.refresh),
-                      tooltip: '刷新',
+                      icon: const Icon(Icons.refresh, size: 17),
+                      label: const Text('刷新'),
+                      style: ElevatedButton.styleFrom(
+                        elevation: 0,
+                        backgroundColor: AppColors.primarySoft,
+                        foregroundColor: AppColors.primary,
+                      ),
                       onPressed:
                           state.refreshStatus == OpStatus.loading
                               ? null
@@ -70,7 +75,7 @@ class _DrivePageState extends State<DrivePage> {
                                   await state.loadUsage();
                                 },
                     ),
-                    const SizedBox(width: AppSpacing.xs),
+                    const SizedBox(width: AppSpacing.sm),
                     ElevatedButton.icon(
                       key: const Key('driveUploadButton'),
                       onPressed: uploading ? null : _upload,
@@ -83,7 +88,7 @@ class _DrivePageState extends State<DrivePage> {
               if (state.usageInfo != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.lg, vertical: AppSpacing.xs),
+                      horizontal: AppSpacing.xl, vertical: AppSpacing.xs),
                   child: Text(
                     '已用 ${formatSize(state.usageInfo!.totalBytes)} / '
                     '${formatSize(state.usageInfo!.tempLimit)}',
@@ -93,9 +98,16 @@ class _DrivePageState extends State<DrivePage> {
                 ),
               Expanded(
                 child: items.isEmpty
-                    ? const Center(child: Text('网盘为空'))
-                    : ListView.builder(
+                    ? const Center(
+                        child: Text('网盘为空',
+                            style:
+                                TextStyle(color: AppColors.textSecondary)))
+                    : ListView.separated(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.xl),
                         itemCount: items.length,
+                        separatorBuilder: (context, index) => const Divider(
+                            height: 1, color: AppColors.hairline),
                         itemBuilder: (context, index) =>
                             _tileFor(context, items[index]),
                       ),
@@ -116,6 +128,7 @@ class _DrivePageState extends State<DrivePage> {
       children: [
         ItemTile(
           item: item,
+          sourceLabel: state.deviceDisplayName(item.sourceDevice),
           statusText: formatExpiry(item),
           primaryAction: canDownload
               ? IconButton(

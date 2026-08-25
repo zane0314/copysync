@@ -68,6 +68,7 @@ class CopySyncApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'CopySync',
+      debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       home: ListenableBuilder(
         listenable: state,
