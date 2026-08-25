@@ -41,6 +41,13 @@ class FakeBridge implements NativeBridge {
   String? lastCopiedHistoryId;
   int watchStartCount = 0;
   BridgeHotkey? registeredHotkey;
+  final List<BridgeHotkey> registeredHotkeys = [];
+  int showMainWindowCount = 0;
+  int toggleMainWindowCount = 0;
+  final List<String> setStatusMessages = [];
+
+  /// 非 null 时 screenshotCaptureRegion 返回该结果（默认用户取消）。
+  BridgeResult<BridgeHistoryItem>? screenshotResult;
   String? lastUpdateManifestUrl;
   String? installedUpdatePath;
 
@@ -58,22 +65,32 @@ class FakeBridge implements NativeBridge {
 
   @override
   Future<BridgeResult<void>> menubarSetStatus(
-          {required bool ok, required String message}) async =>
-      failWith != null ? _fail() : const BridgeResult.success(null);
+      {required bool ok, required String message}) async {
+    if (failWith != null) return _fail();
+    setStatusMessages.add(message);
+    return const BridgeResult.success(null);
+  }
 
   @override
-  Future<BridgeResult<void>> menubarShowMainWindow() async =>
-      failWith != null ? _fail() : const BridgeResult.success(null);
+  Future<BridgeResult<void>> menubarShowMainWindow() async {
+    if (failWith != null) return _fail();
+    showMainWindowCount += 1;
+    return const BridgeResult.success(null);
+  }
 
   @override
-  Future<BridgeResult<void>> menubarToggleMainWindow() async =>
-      failWith != null ? _fail() : const BridgeResult.success(null);
+  Future<BridgeResult<void>> menubarToggleMainWindow() async {
+    if (failWith != null) return _fail();
+    toggleMainWindowCount += 1;
+    return const BridgeResult.success(null);
+  }
 
   @override
   Future<BridgeResult<void>> hotkeyRegister(BridgeHotkey hotkey,
       {HistoryShortcut? shortcut}) async {
     if (failWith != null) return _fail();
     registeredHotkey = hotkey;
+    registeredHotkeys.add(hotkey);
     return const BridgeResult.success(null);
   }
 
@@ -114,11 +131,12 @@ class FakeBridge implements NativeBridge {
       failWith != null ? _fail() : const BridgeResult.success(null);
 
   @override
-  Future<BridgeResult<BridgeHistoryItem>> screenshotCaptureRegion() async =>
-      failWith != null
-          ? _fail()
-          : const BridgeResult.failure(
-              errorCode: BridgeErrorCodes.cancelled, errorMessage: '已取消');
+  Future<BridgeResult<BridgeHistoryItem>> screenshotCaptureRegion() async {
+    if (failWith != null) return _fail();
+    return screenshotResult ??
+        const BridgeResult.failure(
+            errorCode: BridgeErrorCodes.cancelled, errorMessage: '已取消');
+  }
 
   @override
   Future<BridgeResult<void>> pasteIntoPreviousApp(

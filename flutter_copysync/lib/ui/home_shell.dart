@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
@@ -8,11 +9,13 @@ import '../bridge/native_bridge.dart';
 import '../bridge/update_checker.dart';
 import '../state/app_state.dart';
 import '../state/history_controller.dart';
+import '../state/menu_coordinator.dart';
 import 'drive_page.dart';
 import 'history_page.dart';
 import 'history_popup.dart';
 import 'inbox_page.dart';
 import 'settings_page.dart';
+import 'share_confirm_dialog.dart';
 import 'tokens.dart';
 
 /// 主壳：桌面为蓝色环境底上的毛玻璃侧栏 + 毛玻璃主面板（含历史浮窗覆盖层），
@@ -24,6 +27,7 @@ class HomeShell extends StatefulWidget {
     this.bridge,
     this.updater,
     this.history,
+    this.menu,
     this.desktopLayout,
   });
 
@@ -31,6 +35,9 @@ class HomeShell extends StatefulWidget {
   final NativeBridge? bridge;
   final UpdateChecker? updater;
   final HistoryController? history;
+
+  /// macOS 菜单栏动作协调器（切换 tab / 二次确认 / 底部状态栏）。
+  final MenuCoordinator? menu;
 
   /// 强制桌面/移动布局（测试用）；null 时按平台判断。
   final bool? desktopLayout;
@@ -49,6 +56,74 @@ class _HomeShellState extends State<HomeShell> {
     Icons.cloud_outlined,
     Icons.settings,
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    widget.menu?.onSelectTab = (index) => setState(() => _index = index);
+    widget.menu?.confirmHandler = _confirmDanger;
+    // Android：系统分享入口（ACTION_SEND 缓存于原生侧），冷启动主动拉取 +
+    // share.pending 事件即时弹出确认对话框。
+    final host = widget.state.android;
+    if (host != null) {
+      _shareSub = host.events.listen((event) {
+        if (event.name == 'share.pending') _checkPendingShares();
+      });
+      _checkPendingShares();
+    }
+  }
+
+  StreamSubscription<dynamic>? _shareSub;
+  bool _shareDialogOpen = false;
+
+  Future<void> _checkPendingShares() async {
+    final host = widget.state.android;
+    if (host == null || _shareDialogOpen || !mounted) return;
+    final result = await host.sharePending();
+    if (!mounted || !result.ok || (result.value ?? []).isEmpty) return;
+    _shareDialogOpen = true;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => ShareConfirmDialog(
+        payloads: result.value!,
+        state: widget.state,
+        host: host,
+      ),
+    );
+    _shareDialogOpen = false;
+  }
+
+  @override
+  void dispose() {
+    _shareSub?.cancel();
+    widget.menu?.onSelectTab = null;
+    widget.menu?.confirmHandler = null;
+    super.dispose();
+  }
+
+  /// 菜单栏危险动作的二次确认对话框。
+  Future<bool> _confirmDanger(String title, String message) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('menuConfirmButton'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('确认'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
 
   void _select(int index) => setState(() => _index = index);
 
@@ -104,7 +179,27 @@ class _HomeShellState extends State<HomeShell> {
                     const SizedBox(width: AppSpacing.lg),
                     Expanded(
                       child: GlassPanel(
-                        child: IndexedStack(index: _index, children: pages),
+                        child: Column(
+                          children: [
+                            Expanded(
+                              child: IndexedStack(
+                                  index: _index, children: pages),
+                            ),
+                            if (widget.menu != null)
+                              ListenableBuilder(
+                                listenable: widget.menu!,
+                                builder: (context, _) =>
+                                    widget.menu!.footerVisible
+                                        ? _StatusFooter(
+                                            message:
+                                                widget.menu!.statusMessage,
+                                            online: widget
+                                                .state.onlineDeviceCount,
+                                          )
+                                        : const SizedBox.shrink(),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -120,6 +215,43 @@ class _HomeShellState extends State<HomeShell> {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 底部状态栏（旧版"显示底部状态栏"菜单开关对应的 UI）：状态文本 + 在线设备数。
+class _StatusFooter extends StatelessWidget {
+  const _StatusFooter({required this.message, required this.online});
+
+  final String message;
+  final int online;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('statusFooter'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.circle, size: 8, color: AppColors.success),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(message,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: AppColors.textSecondary, fontSize: 12)),
+          ),
+          Text('$online 台设备在线',
+              style: const TextStyle(
+                  color: AppColors.textSecondary, fontSize: 12)),
+        ],
       ),
     );
   }

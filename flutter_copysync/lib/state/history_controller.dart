@@ -75,6 +75,9 @@ class HistoryController extends ChangeNotifier {
         if (args is Map && args['id'] == 'history') toggle();
       case 'menubar.action':
         if (args is Map && args['action'] == 'toggleHistory') toggle();
+        if (args is Map && args['action'] == 'openHistory' && !visible) {
+          toggle();
+        }
       case 'clipboard.changed':
         _ignore(_onClipboardChanged(args));
     }

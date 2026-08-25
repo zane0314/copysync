@@ -4,6 +4,7 @@ import 'package:copysync/api/api_client.dart';
 import 'package:copysync/main.dart';
 import 'package:copysync/state/app_state.dart';
 import 'package:copysync/state/history_controller.dart';
+import 'package:copysync/state/menu_coordinator.dart';
 
 import 'fake_bridge.dart';
 import 'fake_v1_server.dart';
@@ -20,11 +21,12 @@ Future<AppState> loggedInState(FakeV1Server server) async {
   return state;
 }
 
-/// 完整应用壳（含可选桥与历史浮窗控制器）。
+/// 完整应用壳（含可选桥、历史浮窗控制器与菜单协调器）。
 Widget testShell(
   AppState state, {
   FakeBridge? bridge,
   HistoryController? history,
+  MenuCoordinator? menu,
   bool? desktopLayout,
 }) {
   return CopySyncApp(
@@ -32,6 +34,7 @@ Widget testShell(
     bridge: bridge,
     updater: bridge,
     history: history,
+    menu: menu,
     desktopLayout: desktopLayout,
   );
 }
@@ -42,10 +45,14 @@ Future<void> pumpShell(
   AppState state, {
   FakeBridge? bridge,
   HistoryController? history,
+  MenuCoordinator? menu,
   bool? desktopLayout,
 }) async {
   await tester.pumpWidget(testShell(state,
-      bridge: bridge, history: history, desktopLayout: desktopLayout));
+      bridge: bridge,
+      history: history,
+      menu: menu,
+      desktopLayout: desktopLayout));
   await tester.pump();
   await tester.pump();
 }
