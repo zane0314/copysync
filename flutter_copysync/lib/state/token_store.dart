@@ -5,6 +5,10 @@ abstract class TokenStore {
   Future<String?> read();
   Future<void> save(String token);
   Future<void> clear();
+
+  /// 当前设备 id（方向判断等用；与 token 同生命周期）。
+  Future<String?> readDeviceId();
+  Future<void> saveDeviceId(String deviceId);
 }
 
 /// 生产实现：iOS Keychain / Android Keystore / macOS Keychain。
@@ -16,6 +20,7 @@ class SecureTokenStore implements TokenStore {
     mOptions: MacOsOptions(useDataProtectionKeyChain: false),
   );
   static const _key = 'copysync_v1_token';
+  static const _deviceKey = 'copysync_v1_device_id';
 
   @override
   Future<String?> read() => _storage.read(key: _key);
@@ -24,5 +29,15 @@ class SecureTokenStore implements TokenStore {
   Future<void> save(String token) => _storage.write(key: _key, value: token);
 
   @override
-  Future<void> clear() => _storage.delete(key: _key);
+  Future<void> clear() async {
+    await _storage.delete(key: _key);
+    await _storage.delete(key: _deviceKey);
+  }
+
+  @override
+  Future<String?> readDeviceId() => _storage.read(key: _deviceKey);
+
+  @override
+  Future<void> saveDeviceId(String deviceId) =>
+      _storage.write(key: _deviceKey, value: deviceId);
 }

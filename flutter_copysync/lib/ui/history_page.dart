@@ -80,7 +80,7 @@ class HistoryPage extends StatelessWidget {
   }
 
   Widget _transferTile(BuildContext context, Item item) {
-    final isOut = item.sourceDevice == state.device?.id;
+    final isOut = item.sourceDevice == state.currentDeviceId;
     final related =
         state.deliveries.where((d) => d.itemId == item.id).toList();
     final delivery = related.isEmpty ? null : related.last;
@@ -89,7 +89,7 @@ class HistoryPage extends StatelessWidget {
         ? '发出 → ${_deviceName(item.targetDevice)}'
         : '收到 ← ${_deviceName(item.sourceDevice)}';
     final ackable = delivery != null &&
-        delivery.targetDevice == state.device?.id &&
+        delivery.targetDevice == state.currentDeviceId &&
         delivery.status == 'waiting';
     final acking = delivery != null &&
         state.entryOp(delivery.id) == OpStatus.loading;

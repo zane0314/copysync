@@ -71,6 +71,18 @@ void main() {
       await state.restoreSession();
       expect(state.isLoggedIn, isTrue);
     });
+
+    test('restoreSession 同时恢复设备 id（重启后方向判断不丢）', () async {
+      await loginOk();
+      // 模拟重启：新 AppState 复用同一存储。
+      final restored = AppState(
+        api: ApiClient(server.baseUrl),
+        tokenStore: state.tokenStore,
+      );
+      await restored.restoreSession();
+      expect(restored.isLoggedIn, isTrue);
+      expect(restored.currentDeviceId, 'dev-1');
+    });
   });
 
   group('发送文本', () {

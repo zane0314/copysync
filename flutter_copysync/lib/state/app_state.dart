@@ -21,7 +21,13 @@ class AppState extends ChangeNotifier {
   String? loginError;
   Device? device;
 
+  /// 重启后经 restoreSession 恢复的设备 id（device 对象本身不持久化）。
+  String? restoredDeviceId;
+
   bool get isLoggedIn => api.token != null;
+
+  /// 当前设备 id：登录态取 device，重启恢复后取 restoredDeviceId。
+  String? get currentDeviceId => device?.id ?? restoredDeviceId;
 
   // ---- 收件箱 ----
   OpStatus refreshStatus = OpStatus.idle;
@@ -81,7 +87,9 @@ class AppState extends ChangeNotifier {
         platform: platform,
       );
       await tokenStore.save(result.token);
+      await tokenStore.saveDeviceId(result.device.id);
       device = result.device;
+      restoredDeviceId = result.device.id;
       loginStatus = OpStatus.success;
       notifyListeners();
       return true;
@@ -97,6 +105,7 @@ class AppState extends ChangeNotifier {
     final token = await tokenStore.read();
     if (token != null && token.isNotEmpty) {
       api.token = token;
+      restoredDeviceId = await tokenStore.readDeviceId();
       notifyListeners();
     }
   }
@@ -110,6 +119,7 @@ class AppState extends ChangeNotifier {
     await tokenStore.clear();
     api.token = null;
     device = null;
+    restoredDeviceId = null;
     devices = [];
     items = [];
     deliveries = [];

@@ -217,7 +217,7 @@ class _InboxPageState extends State<InboxPage> {
 
   Widget _buildTargetAndActions(bool sending) {
     final targets =
-        state.devices.where((d) => d.id != state.device?.id).toList();
+        state.devices.where((d) => d.id != state.currentDeviceId).toList();
     return Wrap(
       spacing: AppSpacing.sm,
       runSpacing: AppSpacing.sm,
@@ -300,7 +300,7 @@ class _InboxPageState extends State<InboxPage> {
 
   List<PopupMenuEntry<void>> _menuFor(Item item) {
     final targets =
-        state.devices.where((d) => d.id != state.device?.id).toList();
+        state.devices.where((d) => d.id != state.currentDeviceId).toList();
     return [
       for (final d in targets)
         PopupMenuItem(
