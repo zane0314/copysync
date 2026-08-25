@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CopySync · 线路选择</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="stylesheet" href="/app.css">
+  <style>
+    .go-card { width: min(480px, 100%); padding: 30px 28px; }
+    .go-card h1 { margin: 0 0 4px; font-size: 22px; color: var(--navy); }
+    .go-line { border: 1px solid var(--hairline); border-radius: 14px; padding: 14px 16px; margin: 12px 0; background: rgba(255,255,255,.7); }
+    .go-line .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .go-line .url { word-break: break-all; }
+    .go-line .probe { margin: 8px 0 0; }
+  </style>
+</head>
+<body>
+  <div class="bg-decor" aria-hidden="true"></div>
+  <section class="login-view">
+    <div class="login-card go-card">
+      <h1>选择入口</h1>
+      <p class="muted" id="hint">检测使用 HTTPS 请求，每条线路最多测 3 次，手动选择入口。</p>
+      <div id="links"></div>
+    </div>
+  </section>
+  <script>
+    const targets = [
+      { id: 'direct', name: '直连 VPS', url: '__DIRECT_URL__' },
+      { id: 'cf', name: 'Cloudflare', url: '__CF_URL__' },
+    ];
+    const links = document.getElementById('links');
+    const hint = document.getElementById('hint');
+    links.innerHTML = targets.map(t =>
+      `<div class="go-line"><div class="top"><div><strong>${t.name}</strong><div class="muted url">${t.url}</div></div>` +
+      `<a class="btn small" href="${t.url}">打开</a></div><p class="muted probe" id="${t.id}">检测中…</p></div>`
+    ).join('');
+    async function testLine(t) {
+      const values = [];
+      for (let i = 0; i < 3; i++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        const start = performance.now();
+        try {
+          const r = await fetch(t.url + '/probe?ts=' + Date.now(), { cache: 'no-store', signal: controller.signal });
+          if (r.ok) values.push(Math.round(performance.now() - start));
+        } catch {}
+        clearTimeout(timeout);
+      }
+      const el = document.getElementById(t.id);
+      if (!values.length) {
+        el.textContent = '不可用或超时';
+        return { ...t, ms: 0 };
+      }
+      values.sort((a, b) => a - b);
+      const ms = values[Math.floor(values.length / 2)];
+      el.textContent = `约 ${ms} ms，${values.length}/3 次成功`;
+      return { ...t, ms };
+    }
+    Promise.all(targets.map(testLine)).then(results => {
+      const usable = results.filter(r => r.ms);
+      if (usable.length) {
+        usable.sort((a, b) => a.ms - b.ms);
+        hint.textContent = `正在进入延迟最低的 ${usable[0].name}（约 ${usable[0].ms} ms）…`;
+        location.replace(usable[0].url);
+      } else {
+        hint.textContent = '两条线路当前都未检测成功，请稍后手动选择。';
+      }
+    });
+  </script>
+</body>
+</html>

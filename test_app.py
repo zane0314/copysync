@@ -44,57 +44,37 @@ class WebClipboardTest(unittest.TestCase):
         with app.db() as conn:
             self.assertEqual([row[0] for row in conn.execute("select id from items")], ["pin"])
 
-    def test_every_card_has_copy_download_refresh_and_event_sync(self):
-        page = app.index_html().decode()
-        self.assertIn('data-copy="${i.id}">复制</button>', page)
-        self.assertIn('data-download="${i.id}" href="/download/${i.id}" download>下载</a>', page)
-        self.assertIn('id="refreshBtn">刷新</button>', page)
-        self.assertIn('<title>CopySync</title>', page)
-        self.assertIn('href="/favicon.png"', page)
-        self.assertIn("new EventSource('/api/events')", page)
-        self.assertNotIn('setInterval(', page)
-        self.assertIn("new ClipboardItem({'image/png': png})", page)
-        self.assertIn('class="workspace"', page)
-        self.assertIn('class="panel drive"', page)
-        self.assertIn('class="panel transfer"', page)
-        self.assertIn('id="syncWeb"', page)
-        self.assertIn('id="targetDevice"', page)
-        self.assertIn("const IS_ANDROID_APP", page)
-        self.assertIn('class="android-quick"', page)
-        self.assertIn('粘贴文本', page)
-        self.assertIn('选文件', page)
-        self.assertIn('选照片', page)
-        self.assertIn('data-receive="${t.id}"', page)
-        self.assertIn('async function receiveTransfer(deliveryId)', page)
-        self.assertIn("type:'revealReceived'", page)
-        self.assertIn('CopySyncNative.receiveFile(transfer.id, transfer.item_id', page)
-        self.assertIn('CopySyncNative.revealReceived(transfer.id, transfer.item_id', page)
-        self.assertIn("CopySyncNative.saveSent", page)
-        self.assertIn("CopySyncNative.localFileState", page)
-        self.assertIn("function copySyncLocalFileReady", page)
-        self.assertIn("已在文件管理器中定位已发送文件", page)
-        self.assertIn("文件正在接收，请稍候", page)
-        self.assertIn("本地文件已删除，正在重新接收", page)
-        self.assertIn("type:'saveSent'", page)
-        self.assertIn("copyLink.textContent = '复制下载链接'", page)
-        self.assertIn("await copyDownloadLink(transfer.item_id)", page)
-        self.assertIn("type:'copyText'", page)
-        self.assertIn("CopySyncNative.copyText", page)
-        self.assertIn("window.__copyDownloadUrl = link", page)
-        self.assertIn("'/api/items/' + encodeURIComponent(itemId) + '/link'", page)
-        self.assertNotIn("MacBook", page)
-        self.assertNotIn("Windows", page)
-        self.assertIn("showGlassToast('下载链接已复制')", page)
-        self.assertIn("toast.classList.remove('show'), 3000", page)
-        self.assertIn('id="androidInboxList"', page)
-        self.assertIn('id="androidDrive"', page)
-        self.assertIn('id="androidRecords"', page)
-        self.assertIn("传输记录", page)
-        self.assertIn('data-receive="${t.id}"', page)
-        self.assertIn("fileMsg.textContent = '已开始下载 '", page)
-        self.assertIn('@media (max-width:900px)', page)
-        self.assertIn('location.replace(usable[0].url)', page)
-        self.assertNotIn('但仍由你手动选择', page)
+    def test_web_client_files_cover_required_features(self):
+        html = (app.WEB_DIR / "index.html").read_text(encoding="utf-8")
+        js = (app.WEB_DIR / "app.js").read_text(encoding="utf-8")
+        css = (app.WEB_DIR / "app.css").read_text(encoding="utf-8")
+        go = (app.WEB_DIR / "go.html").read_text(encoding="utf-8")
+        self.assertIn("<title>CopySync</title>", html)
+        self.assertIn('href="/favicon.png"', html)
+        self.assertIn('src="/app.js"', html)
+        self.assertIn('href="/app.css"', html)
+        # 设计 §8.1 固定结构：侧栏、收件箱、传输历史、临时网盘、设置
+        for marker in ('data-view="inbox"', 'data-view="transfers"', 'data-view="drive"',
+                       'data-view="settings"', 'id="dropZone"', 'id="targetDevice"',
+                       '粘贴文本', '选择文件', '选择照片', 'id="searchInput"',
+                       'data-kind="pinned"', 'id="clearTempBtn"', 'id="logoutBtn"'):
+            self.assertIn(marker, html)
+        # 全部走 /api/v1（Cookie 认证），不残留旧内嵌 API 调用
+        for marker in ('/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/devices',
+                       '/api/v1/items', '/api/v1/deliveries', '/api/v1/usage',
+                       '/api/v1/items/clear-temp', "new EventSource('/api/v1/events')",
+                       '/heartbeat', '/ack', 'variant=clipboard', 'Idempotency-Key',
+                       'confirm(', 'ClipboardItem'):
+            self.assertIn(marker, js)
+        self.assertNotIn("'/api/items/'", js)
+        self.assertNotIn("'/api/login'", js)
+        self.assertIn("@media (max-width: 860px)", css)
+        self.assertIn("backdrop-filter", css)
+        # /go 线路选择：探测 + 自动进入最低延迟线路
+        self.assertIn("__DIRECT_URL__", go)
+        self.assertIn("__CF_URL__", go)
+        self.assertIn("/probe?ts=", go)
+        self.assertIn("location.replace(usable[0].url)", go)
 
     def test_note_column_exists(self):
         with app.db() as conn:
@@ -1209,6 +1189,47 @@ class V1Case(unittest.TestCase):
         s, b = self.raw_post("/api/v1/items/clear-temp", {})
         self.assertEqual(s, 401)
         self.assertEqual(b["error"]["code"], "unauthorized")
+
+    def test_static_index_served_at_root(self):
+        status, headers, data = self.raw_download("/")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", headers["Content-Type"])
+        self.assertIn(b'<script src="/app.js">', data)
+        self.assertNotIn(b"__FORCE_GO__", data)
+
+    def test_static_assets_served_with_content_type(self):
+        status, headers, data = self.raw_download("/app.js")
+        self.assertEqual(status, 200)
+        self.assertIn("javascript", headers["Content-Type"])
+        self.assertEqual(data, (app.WEB_DIR / "app.js").read_bytes())
+        status, headers, data = self.raw_download("/app.css")
+        self.assertEqual(status, 200)
+        self.assertIn("text/css", headers["Content-Type"])
+        self.assertEqual(data, (app.WEB_DIR / "app.css").read_bytes())
+
+    def test_static_unknown_path_404(self):
+        for path in ("/app.py", "/../app.py", "/web/index.html", "/index.html"):
+            status, _, _ = self.raw_download(path)
+            self.assertEqual(status, 404, path)
+
+    def test_go_page_served_with_line_targets(self):
+        status, headers, data = self.raw_download("/go")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", headers["Content-Type"])
+        self.assertNotIn(b"__DIRECT_URL__", data)
+        self.assertNotIn(b"__CF_URL__", data)
+        self.assertIn(b"/probe?ts=", data)
+
+    def test_embedded_index_html_removed(self):
+        self.assertFalse(hasattr(app, "INDEX_HTML"))
+        self.assertFalse(hasattr(app, "index_html"))
+
+    def test_static_pages_public_but_apis_still_authed(self):
+        # 静态页公开可访问（登录在页面内完成），v1 API 仍需 Cookie/Token
+        status, _, _ = self.raw_download("/")
+        self.assertEqual(status, 200)
+        s, b = self.raw_get("/api/v1/items")
+        self.assertEqual(s, 401)
 
     def test_migrate_v1_creates_tables_and_is_repeatable(self):
         with app.db() as conn:

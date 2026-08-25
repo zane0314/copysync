@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CopySync</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="bg-decor" aria-hidden="true"></div>
+
+  <!-- 登录视图 -->
+  <section id="loginView" class="login-view" hidden>
+    <form id="loginForm" class="login-card" autocomplete="off">
+      <div class="brand-badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7L12 2z" fill="url(#lg)"/><defs><linearGradient id="lg" x1="0" y1="0" x2="24" y2="24"><stop stop-color="#5b92ff"/><stop offset="1" stop-color="#2f6bff"/></linearGradient></defs><path d="M8 12.5l2.5 2.5L16 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h1>CopySync</h1>
+      <p class="muted">智能文件同步</p>
+      <input id="loginPassword" type="password" autocomplete="current-password" placeholder="密码" required>
+      <p class="form-msg" id="loginMsg" role="alert"></p>
+      <button id="loginBtn" type="submit">登录</button>
+    </form>
+  </section>
+
+  <!-- 主界面 -->
+  <div id="appShell" class="shell" hidden>
+    <aside class="sidebar glass">
+      <div class="brand">
+        <div class="brand-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7L12 2z" fill="url(#lg2)"/><defs><linearGradient id="lg2" x1="0" y1="0" x2="24" y2="24"><stop stop-color="#5b92ff"/><stop offset="1" stop-color="#2f6bff"/></linearGradient></defs><path d="M8 12.5l2.5 2.5L16 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div><strong>CopySync</strong><span class="muted">智能文件同步</span></div>
+      </div>
+      <nav class="nav" aria-label="主导航">
+        <button type="button" class="nav-item" data-view="inbox"><span class="nav-icon" data-icon="inbox"></span>收件箱<span class="badge" id="inboxBadge" hidden></span></button>
+        <button type="button" class="nav-item" data-view="transfers"><span class="nav-icon" data-icon="history"></span>传输历史</button>
+        <button type="button" class="nav-item" data-view="drive"><span class="nav-icon" data-icon="drive"></span>临时网盘</button>
+      </nav>
+      <button type="button" class="nav-item settings-link" data-view="settings"><span class="nav-icon" data-icon="settings"></span>设置</button>
+    </aside>
+
+    <main class="main glass">
+      <div id="netBanner" class="net-banner" hidden><span id="netBannerText"></span><button type="button" id="netRetry" class="btn small">重试</button></div>
+
+      <!-- 收件箱 -->
+      <section id="view-inbox" class="view">
+        <header class="view-head">
+          <div>
+            <h1>收件箱</h1>
+            <p class="online-line"><span class="dot"></span><span id="onlineCount">设备连接中…</span></p>
+          </div>
+          <button type="button" class="btn soft" id="refreshBtn"><span class="btn-icon" data-icon="refresh"></span>刷新</button>
+        </header>
+
+        <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="拖文件到这里上传">
+          <span class="drop-icon" data-icon="upload"></span>
+          <strong>拖文件到这里上传</strong>
+          <span class="muted">支持文本、文件、照片</span>
+        </div>
+
+        <div class="send-bar">
+          <label class="send-target"><span class="btn-icon" data-icon="sendto"></span><select id="targetDevice" aria-label="发送目标"></select></label>
+          <button type="button" class="pill" id="pasteBtn"><span class="btn-icon" data-icon="paste"></span>粘贴文本</button>
+          <label class="pill" for="fileInput"><span class="btn-icon" data-icon="file"></span>选择文件</label>
+          <label class="pill" for="imageInput"><span class="btn-icon" data-icon="image"></span>选择照片</label>
+        </div>
+
+        <div id="composer" class="composer" hidden>
+          <textarea id="composerText" placeholder="输入或粘贴文本" rows="3"></textarea>
+          <div class="composer-foot">
+            <span id="composerFiles" class="muted"></span>
+            <span class="form-msg" id="composerMsg"></span>
+            <button type="button" class="btn" id="sendBtn">发送</button>
+          </div>
+        </div>
+
+        <h2 class="section-title">我的文件</h2>
+        <div id="inboxList" class="list"><div class="empty">正在载入…</div></div>
+      </section>
+
+      <!-- 传输历史 -->
+      <section id="view-transfers" class="view" hidden>
+        <header class="view-head">
+          <div>
+            <h1>传输历史</h1>
+            <p class="muted">完整记录 · 保留 30 天 · 点击记录可复制文本或重新接收文件</p>
+          </div>
+          <button type="button" class="btn soft" id="refreshBtn2"><span class="btn-icon" data-icon="refresh"></span>刷新</button>
+        </header>
+        <div id="transferList" class="list"><div class="empty">正在载入…</div></div>
+      </section>
+
+      <!-- 临时网盘 -->
+      <section id="view-drive" class="view" hidden>
+        <header class="view-head">
+          <div>
+            <h1>临时网盘</h1>
+            <p class="muted"><span id="usageLine">正在计算空间…</span> · 默认保存 7 天</p>
+          </div>
+          <label class="btn soft" for="driveFiles"><span class="btn-icon" data-icon="upload"></span>上传</label>
+        </header>
+        <input class="search" id="searchInput" type="search" placeholder="搜索文本、文件和图片" aria-label="搜索">
+        <div class="filters" id="filters">
+          <button type="button" class="chip active" data-kind="">全部</button>
+          <button type="button" class="chip" data-kind="text">文本</button>
+          <button type="button" class="chip" data-kind="file">文件</button>
+          <button type="button" class="chip" data-kind="image">图片</button>
+          <button type="button" class="chip" data-kind="pinned">已固定</button>
+        </div>
+        <div id="driveList" class="list"><div class="empty">正在载入…</div></div>
+        <footer class="drive-foot">
+          <span class="muted" id="clearMsg"></span>
+          <button type="button" class="btn danger-soft" id="clearTempBtn">清理临时内容</button>
+        </footer>
+      </section>
+
+      <!-- 设置 -->
+      <section id="view-settings" class="view" hidden>
+        <header class="view-head"><div><h1>设置</h1><p class="muted">当前设备与线路</p></div></header>
+        <div class="settings-card">
+          <div class="settings-row"><span class="muted">当前设备</span><strong id="settingsDevice">未知</strong></div>
+          <div class="settings-row"><span class="muted">线路</span><a class="btn soft" href="/go">线路选择</a></div>
+          <div class="settings-row"><span class="muted">登录状态</span><button type="button" class="btn danger-soft" id="logoutBtn">退出登录</button></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 图片预览 -->
+  <div id="previewOverlay" class="preview-overlay" hidden>
+    <button type="button" class="preview-close" id="previewClose" aria-label="关闭预览">✕</button>
+    <img id="previewImg" alt="图片预览">
+  </div>
+
+  <div id="menu" class="menu" hidden></div>
+  <div id="toast" class="toast" role="status"></div>
+
+  <input id="fileInput" type="file" multiple hidden>
+  <input id="imageInput" type="file" accept="image/*" multiple hidden>
+  <input id="driveFiles" type="file" multiple hidden>
+
+  <script src="/app.js"></script>
+</body>
+</html>
