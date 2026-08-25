@@ -124,6 +124,18 @@
           <div class="settings-row"><span class="muted">线路</span><a class="btn soft" href="/go">线路选择</a></div>
           <div class="settings-row"><span class="muted">登录状态</span><button type="button" class="btn danger-soft" id="logoutBtn">退出登录</button></div>
         </div>
+        <div class="settings-card">
+          <form id="passwordForm">
+            <div class="settings-row"><span class="muted">当前密码</span><input id="currentPassword" type="password" autocomplete="current-password" required></div>
+            <div class="settings-row"><span class="muted">新密码</span><input id="newPassword" type="password" autocomplete="new-password" minlength="12" placeholder="至少 12 个字符" required></div>
+            <div class="settings-row"><span class="form-msg" id="passwordMsg"></span><button type="submit" class="btn soft" id="passwordBtn">修改密码</button></div>
+            <p class="muted">修改成功后所有设备（含本机）都需要重新登录。</p>
+          </form>
+        </div>
+        <div class="settings-card">
+          <div class="settings-row"><span class="muted">危险操作</span><button type="button" class="btn danger-soft" id="clearAllBtn">彻底清空全部内容</button></div>
+          <p class="muted" id="clearAllMsg">删除全部内容（含已固定），不可恢复，需二次确认。</p>
+        </div>
       </section>
     </main>
   </div>

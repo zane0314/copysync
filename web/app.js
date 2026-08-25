@@ -727,6 +727,48 @@ async function clearTemp(button) {
   });
 }
 
+/* 彻底清空：删除全部内容（含已固定），二次确认。 */
+async function clearAll(button) {
+  if (!confirm('彻底清空将删除全部内容（含已固定），不可恢复。继续？')) return;
+  if (!confirm('再次确认：真的要清空全部内容吗？')) return;
+  await withButton(button, '清空中…', async () => {
+    try {
+      const result = await api('/api/v1/items/clear-all', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': newIdemKey() },
+      });
+      $('clearAllMsg').textContent = `已清空 ${result.deleted} 项，释放 ${fmtSize(result.bytes)}`;
+      await refreshAll();
+    } catch (err) {
+      $('clearAllMsg').textContent = '清空失败：' + err.message;
+    }
+  });
+}
+
+/* 修改密码：成功后全设备 Token 失效，回到登录页。 */
+async function changePassword(e) {
+  e.preventDefault();
+  const btn = $('passwordBtn');
+  const msg = $('passwordMsg');
+  msg.textContent = '';
+  await withButton(btn, '修改中…', async () => {
+    try {
+      await api('/api/v1/auth/password', {
+        method: 'POST',
+        body: JSON.stringify({
+          current_password: $('currentPassword').value,
+          new_password: $('newPassword').value,
+        }),
+      });
+      toast('密码已修改，请用新密码重新登录');
+      $('passwordForm').reset();
+      showLogin();
+    } catch (err) {
+      msg.textContent = err.message;
+    }
+  });
+}
+
 /* ---------- 拖拽 ---------- */
 
 function bindDrop(element, onFiles) {
@@ -773,6 +815,8 @@ function bindEvents() {
   $('netRetry').onclick = () => refreshNow($('netRetry'));
   $('logoutBtn').onclick = logout;
   $('clearTempBtn').onclick = () => clearTemp($('clearTempBtn'));
+  $('clearAllBtn').onclick = () => clearAll($('clearAllBtn'));
+  $('passwordForm').onsubmit = changePassword;
   $('sendBtn').onclick = sendComposer;
   $('pasteBtn').onclick = pasteFromClipboard;
   $('composerText').onkeydown = e => {
