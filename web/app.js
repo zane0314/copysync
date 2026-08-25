@@ -105,15 +105,16 @@ async function api(path, opts = {}) {
   } catch (err) {
     throw new Error('网络连接失败，请检查网络后重试');
   }
-  if (resp.status === 401) {
-    showLogin();
-    throw new Error('登录已失效，请重新登录');
-  }
   const text = await resp.text();
   let data = null;
   if (text) { try { data = JSON.parse(text); } catch { data = null; } }
   if (!resp.ok) {
-    throw new Error((data && data.error && data.error.message) || `请求失败（HTTP ${resp.status}）`);
+    const message = (data && data.error && data.error.message) || `请求失败（HTTP ${resp.status}）`;
+    if (resp.status === 401 && !path.startsWith('/api/v1/auth/login')) {
+      showLogin();
+      throw new Error('登录已失效，请重新登录');
+    }
+    throw new Error(message);
   }
   return data || {};
 }
