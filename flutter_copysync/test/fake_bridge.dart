@@ -40,6 +40,8 @@ class FakeBridge implements NativeBridge {
   Uint8List? lastPastePng;
   String? lastCopiedHistoryId;
   int watchStartCount = 0;
+  final List<Map<String, Object?>> savedReceived = [];
+  final List<Map<String, Object?>> revealedReceived = [];
   BridgeHotkey? registeredHotkey;
   final List<BridgeHotkey> registeredHotkeys = [];
   int showMainWindowCount = 0;
@@ -253,15 +255,22 @@ class FakeBridge implements NativeBridge {
 
   @override
   Future<BridgeResult<String>> filesSaveReceived(
-          {required String deliveryId,
-          required String name,
-          required Uint8List data}) async =>
-      failWith != null ? _fail() : BridgeResult.success(name);
+      {required String deliveryId,
+      required String name,
+      required Uint8List data}) async {
+    if (failWith != null) return _fail();
+    savedReceived
+        .add({'deliveryId': deliveryId, 'name': name, 'size': data.length});
+    return BridgeResult.success(name);
+  }
 
   @override
   Future<BridgeResult<String>> filesRevealReceived(
-          {String? deliveryId, required String name}) async =>
-      failWith != null ? _fail() : BridgeResult.success(name);
+      {String? deliveryId, required String name}) async {
+    if (failWith != null) return _fail();
+    revealedReceived.add({'deliveryId': deliveryId, 'name': name});
+    return BridgeResult.success(name);
+  }
 
   @override
   Future<BridgeResult<CacheUsage>> cacheUsage() async =>

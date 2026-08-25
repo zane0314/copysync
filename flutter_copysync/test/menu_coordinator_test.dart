@@ -205,4 +205,47 @@ void main() {
       await server.stop();
     });
   });
+
+  testWidgets('收到文件的下载走 files.saveReceived 且菜单可 Finder 定位',
+      (tester) async {
+    await tester.runAsync(() async {
+      final server = FakeV1Server();
+      await server.start();
+      final state = await loggedInState(server);
+      // 造一个文件条目，并把本机伪装成另一台设备（模拟收到的条目）。
+      final path = '${Directory.systemTemp.path}/copysync_recv_test.bin';
+      await File(path).writeAsBytes(List.filled(64, 66));
+      await state.sendFile(path);
+      state.device = null;
+      state.restoredDeviceId = 'dev-other';
+      await pumpShell(tester, state,
+          bridge: bridge, history: history, menu: menu, desktopLayout: true);
+      final item = state.items.firstWhere((i) => i.name.contains('recv_test'));
+      // 桌面窗口下行内按钮可能被裁切，直接触发回调验证接线。
+      tester
+          .widget<IconButton>(find.byKey(Key('downloadButton-${item.id}')))
+          .onPressed!();
+      for (var i = 0; i < 100 && bridge.savedReceived.isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      await tester.pump();
+      expect(bridge.savedReceived.single['name'], item.name);
+      final moreFinder = find.byKey(Key('more-${item.id}'));
+      // 命中测试在桌面壳内不稳定，直接点开菜单。
+      await tester.tapAt(tester.getCenter(moreFinder));
+      await tester.pump();
+      await tester.pump();
+      // 弹出菜单条目直接触发 onTap（覆盖接线逻辑）。
+      tester
+          .widget<PopupMenuItem<void>>(find.ancestor(
+              of: find.text('在 Finder 中显示'),
+              matching: find.byType(PopupMenuItem<void>)))
+          .onTap!();
+      await tester.pump();
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.revealedReceived.single['name'], item.name);
+      await File(path).delete();
+      await server.stop();
+    });
+  });
 }

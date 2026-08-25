@@ -438,6 +438,13 @@ class _InboxPageState extends State<InboxPage> {
           onTap: () => state.openReceivedItem(item),
           child: const Text('打开已接收文件'),
         ),
+      if (widget.bridge != null && item.kind != 'text')
+        PopupMenuItem(
+          key: Key('revealReceived-${item.id}'),
+          onTap: () => widget.bridge!
+              .filesRevealReceived(deliveryId: item.id, name: item.name),
+          child: const Text('在 Finder 中显示'),
+        ),
       PopupMenuItem(
         onTap: () async {
           if (await confirmDelete(context, item.text.isNotEmpty ? item.text : item.name)) {
@@ -477,8 +484,13 @@ class _InboxPageState extends State<InboxPage> {
       final bytes = await state.api.downloadContent(item.id);
       final bridge = widget.bridge;
       if (bridge != null) {
-        final saved = await bridge.filesSaveSent(
-            itemId: item.id, name: item.name, data: bytes);
+        // 收到的文件按接收语义落盘（reveal 定位用）；本机发出的按 sent: 前缀转存。
+        final isMine = item.sourceDevice == state.currentDeviceId;
+        final saved = isMine
+            ? await bridge.filesSaveSent(
+                itemId: item.id, name: item.name, data: bytes)
+            : await bridge.filesSaveReceived(
+                deliveryId: item.id, name: item.name, data: bytes);
         if (saved.ok) {
           debugPrint('已保存：${saved.value}');
           return;
