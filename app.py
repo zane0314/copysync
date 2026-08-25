@@ -827,6 +827,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.v1_login()
         if path == "/api/v1/auth/logout" and method == "POST":
             return self.v1_logout()
+        if path == "/api/v1/auth/password" and method == "POST":
+            return self.v1_change_password()
         if path == "/api/v1/devices" and method == "GET":
             return self.v1_list_devices()
         if path == "/api/v1/sync" and method == "GET":
@@ -839,6 +841,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.v1_create_item()
         if path == "/api/v1/items/clear-temp" and method == "POST":
             return self.v1_clear_temp()
+        if path == "/api/v1/items/clear-all" and method == "POST":
+            return self.v1_clear_all()
         if path.startswith("/api/v1/items/"):
             rest = urllib.parse.unquote(path[len("/api/v1/items/"):])
             if rest.endswith("/content") and method == "GET":
@@ -972,6 +976,24 @@ class Handler(BaseHTTPRequestHandler):
                 "update device_tokens set revoked_at=? where token_hash=? and revoked_at is null",
                 (now_iso(), hashlib.sha256(token.encode()).hexdigest()),
             )
+        self.send_json({"ok": True}, headers={"Set-Cookie": clear_v1_cookie()})
+
+    def v1_change_password(self):
+        self.require_v1_device()
+        fields = self.read_json()
+        current = str(fields.get("current_password", ""))
+        new = str(fields.get("new_password", ""))
+        if not password_ok(current):
+            self.api_fail(401, "invalid_credentials", "当前密码错误")
+        if not strong_enough(new):
+            self.api_fail(400, "weak_password", "新密码至少 12 个字符")
+        with db() as conn:
+            version = int(get_setting(conn, "session_version") or "1") + 1
+            set_setting(conn, "password_hash", hash_password(new))
+            set_setting(conn, "session_version", str(version))
+            conn.execute("delete from login_failures")
+            # 改密码即全设备下线：所有设备 Token（含当前）立即失效。
+            conn.execute("update device_tokens set revoked_at=? where revoked_at is null", (now_iso(),))
         self.send_json({"ok": True}, headers={"Set-Cookie": clear_v1_cookie()})
 
     def v1_list_devices(self):
@@ -1339,6 +1361,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(result)
 
     def v1_clear_temp(self):
+        self._v1_clear_items("where pinned=0")
+
+    def v1_clear_all(self):
+        self._v1_clear_items("")
+
+    def _v1_clear_items(self, where):
         device = self.require_v1_device()
         idem_key = self.headers.get("idempotency-key", "").strip()
         with db() as conn:
@@ -1347,9 +1375,9 @@ class Handler(BaseHTTPRequestHandler):
                 if cached is not None:
                     self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
                     return
-            rows = conn.execute("select id, stored_name, size from items where pinned=0").fetchall()
+            rows = conn.execute("select id, stored_name, size from items " + where).fetchall()
             blobs = conn.execute(
-                "select item_id, stored_name from item_blobs where item_id in (select id from items where pinned=0)"
+                "select item_id, stored_name from item_blobs where item_id in (select id from items " + where + ")"
             ).fetchall()
             files = []
             seen = set()
@@ -1363,8 +1391,8 @@ class Handler(BaseHTTPRequestHandler):
                     freed += (FILES_DIR / stored).stat().st_size
                 except FileNotFoundError:
                     pass
-            conn.execute("delete from item_blobs where item_id in (select id from items where pinned=0)")
-            conn.execute("delete from items where pinned=0")
+            conn.execute("delete from item_blobs where item_id in (select id from items " + where + ")")
+            conn.execute("delete from items " + where)
             for row in rows:
                 record_change(conn, "item", row["id"], "delete")
             result = {"ok": True, "deleted": len(rows), "bytes": freed}
@@ -1549,6 +1577,8 @@ class Handler(BaseHTTPRequestHandler):
             set_setting(conn, "password_hash", hash_password(new))
             set_setting(conn, "session_version", str(version))
             conn.execute("delete from login_failures")
+            # 改密码即全设备下线：v1 设备 Token 一并撤销。
+            conn.execute("update device_tokens set revoked_at=? where revoked_at is null", (now_iso(),))
         self.send_response(200)
         self.send_header("Set-Cookie", make_session_cookie(version))
         self.end_headers()

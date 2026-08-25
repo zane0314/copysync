@@ -57,12 +57,14 @@ class WebClipboardTest(unittest.TestCase):
         for marker in ('data-view="inbox"', 'data-view="transfers"', 'data-view="drive"',
                        'data-view="settings"', 'id="dropZone"', 'id="targetDevice"',
                        '粘贴文本', '选择文件', '选择照片', 'id="searchInput"',
-                       'data-kind="pinned"', 'id="clearTempBtn"', 'id="logoutBtn"'):
+                       'data-kind="pinned"', 'id="clearTempBtn"', 'id="logoutBtn"',
+                       'id="passwordForm"', 'id="clearAllBtn"'):
             self.assertIn(marker, html)
         # 全部走 /api/v1（Cookie 认证），不残留旧内嵌 API 调用
         for marker in ('/api/v1/auth/login', '/api/v1/auth/logout', '/api/v1/devices',
                        '/api/v1/items', '/api/v1/deliveries', '/api/v1/usage',
-                       '/api/v1/items/clear-temp', "new EventSource('/api/v1/events')",
+                       '/api/v1/items/clear-temp', '/api/v1/items/clear-all',
+                       '/api/v1/auth/password', "new EventSource('/api/v1/events')",
                        '/heartbeat', '/ack', 'variant=clipboard', 'Idempotency-Key',
                        'confirm(', 'ClipboardItem'):
             self.assertIn(marker, js)
@@ -1189,6 +1191,109 @@ class V1Case(unittest.TestCase):
         s, b = self.raw_post("/api/v1/items/clear-temp", {})
         self.assertEqual(s, 401)
         self.assertEqual(b["error"]["code"], "unauthorized")
+
+    def test_v1_clear_all_removes_pinned_and_records_tombstones(self):
+        token, dev = self.login_device("ClearAllWeb", "web")
+        pinned = self.v1_post_text(token, "pinned stays nowhere")
+        plain = self.v1_post_text(token, "plain goes too")
+        s, b = self.raw_patch(f"/api/v1/items/{pinned['id']}", {"pinned": True}, headers=self.auth(token))
+        self.assertEqual(s, 200)
+        s, b = self.raw_post("/api/v1/items/clear-all", {}, headers=self.auth(token))
+        self.assertEqual(s, 200)
+        self.assertGreaterEqual(b["deleted"], 2)
+        for item in (pinned, plain):
+            s, b = self.raw_get(f"/api/v1/items/{item['id']}", headers=self.auth(token))
+            self.assertEqual(s, 404)
+        s, b = self.raw_get("/api/v1/sync?cursor=0", headers=self.auth(token))
+        tombstones = {(t["entity"], t["entity_id"]) for t in b["tombstones"]}
+        self.assertIn(("item", pinned["id"]), tombstones)
+        self.assertIn(("item", plain["id"]), tombstones)
+
+    def test_v1_clear_all_requires_auth(self):
+        s, b = self.raw_post("/api/v1/items/clear-all", {})
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "unauthorized")
+
+    def _restore_password(self):
+        with app.db() as conn:
+            app.set_setting(conn, "password_hash", app.hash_password(PW))
+
+    def test_v1_change_password_revokes_all_tokens(self):
+        token_a, _ = self.login_device("PwMac", "mac")
+        token_b, _ = self.login_device("PwAndroid", "android")
+        try:
+            s, b = self.raw_post(
+                "/api/v1/auth/password",
+                {"current_password": PW, "new_password": "brand-new-password-456"},
+                headers=self.auth(token_a),
+            )
+            self.assertEqual(s, 200)
+            # 全设备 Token 失效，包括发起者本人
+            for token in (token_a, token_b):
+                s, b = self.raw_get("/api/v1/devices", headers=self.auth(token))
+                self.assertEqual(s, 401)
+            # 旧密码不能再登录，新密码可以
+            s, b = self.raw_post(
+                "/api/v1/auth/login",
+                {"password": PW, "device_name": "PwRecheck", "platform": "web"},
+            )
+            self.assertEqual(s, 401)
+            s, b = self.raw_post(
+                "/api/v1/auth/login",
+                {"password": "brand-new-password-456", "device_name": "PwRecheck", "platform": "web"},
+            )
+            self.assertEqual(s, 200)
+        finally:
+            self._restore_password()
+
+    def test_v1_change_password_wrong_current_401(self):
+        token, _ = self.login_device("PwWrong", "web")
+        s, b = self.raw_post(
+            "/api/v1/auth/password",
+            {"current_password": "wrong-current-000", "new_password": "brand-new-password-456"},
+            headers=self.auth(token),
+        )
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "invalid_credentials")
+        # 密码未被改动，token 仍有效
+        s, b = self.raw_get("/api/v1/devices", headers=self.auth(token))
+        self.assertEqual(s, 200)
+
+    def test_v1_change_password_weak_400(self):
+        token, _ = self.login_device("PwWeak", "web")
+        s, b = self.raw_post(
+            "/api/v1/auth/password",
+            {"current_password": PW, "new_password": "short"},
+            headers=self.auth(token),
+        )
+        self.assertEqual(s, 400)
+        self.assertEqual(b["error"]["code"], "weak_password")
+
+    def test_v1_change_password_requires_auth(self):
+        s, b = self.raw_post(
+            "/api/v1/auth/password",
+            {"current_password": PW, "new_password": "brand-new-password-456"},
+        )
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "unauthorized")
+
+    def test_legacy_change_password_revokes_device_tokens(self):
+        token, _ = self.login_device("PwLegacyMac", "mac")
+        session_pair = app.make_session_cookie().split(";", 1)[0]
+        try:
+            s, b = self.raw_post(
+                "/api/password",
+                ("current_password=" + PW + "&new_password=legacy-new-password-789").encode(),
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Cookie": session_pair,
+                },
+            )
+            self.assertEqual(s, 200)
+            s, b = self.raw_get("/api/v1/devices", headers=self.auth(token))
+            self.assertEqual(s, 401)
+        finally:
+            self._restore_password()
 
     def test_static_index_served_at_root(self):
         status, headers, data = self.raw_download("/")
