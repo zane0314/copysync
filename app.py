@@ -1614,8 +1614,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.v1_sync()
         if path == "/api/v1/usage" and method == "GET":
             return self.v1_usage()
+        if path == "/api/v1/items" and method == "GET":
+            return self.v1_list_items()
         if path == "/api/v1/items" and method == "POST":
             return self.v1_create_item()
+        if path == "/api/v1/items/clear-temp" and method == "POST":
+            return self.v1_clear_temp()
         if path.startswith("/api/v1/items/"):
             rest = urllib.parse.unquote(path[len("/api/v1/items/"):])
             if rest.endswith("/content") and method == "GET":
@@ -1629,6 +1633,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.v1_patch_item(rest)
                 if method == "DELETE":
                     return self.v1_delete_item(rest)
+        if path == "/api/v1/deliveries" and method == "GET":
+            return self.v1_list_deliveries()
         if path.startswith("/api/v1/deliveries/"):
             rest = urllib.parse.unquote(path[len("/api/v1/deliveries/"):])
             if rest.endswith("/ack") and method == "POST":
@@ -2041,6 +2047,12 @@ class Handler(BaseHTTPRequestHandler):
             name = item["name"]
         self.send_blob(blob["mime"], name, path=path)
 
+    def v1_list_items(self):
+        self.require_v1_device()
+        with db() as conn:
+            rows = conn.execute("select * from items where web_visible=1 order by created_at desc").fetchall()
+        self.send_json({"items": [item_json(row) for row in rows]})
+
     def v1_get_item(self, item_id):
         self.require_v1_device()
         with db() as conn:
@@ -2107,6 +2119,43 @@ class Handler(BaseHTTPRequestHandler):
         notify_items_changed()
         self.send_json(result)
 
+    def v1_clear_temp(self):
+        device = self.require_v1_device()
+        idem_key = self.headers.get("idempotency-key", "").strip()
+        with db() as conn:
+            if idem_key:
+                cached = idem_replay(conn, device["id"], idem_key)
+                if cached is not None:
+                    self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                    return
+            rows = conn.execute("select id, stored_name, size from items where pinned=0").fetchall()
+            blobs = conn.execute(
+                "select item_id, stored_name from item_blobs where item_id in (select id from items where pinned=0)"
+            ).fetchall()
+            files = []
+            seen = set()
+            for stored in [r["stored_name"] for r in rows] + [r["stored_name"] for r in blobs]:
+                if stored and stored not in seen:
+                    seen.add(stored)
+                    files.append(stored)
+            freed = sum(r["size"] for r in rows if not r["stored_name"])
+            for stored in files:
+                try:
+                    freed += (FILES_DIR / stored).stat().st_size
+                except FileNotFoundError:
+                    pass
+            conn.execute("delete from item_blobs where item_id in (select id from items where pinned=0)")
+            conn.execute("delete from items where pinned=0")
+            for row in rows:
+                record_change(conn, "item", row["id"], "delete")
+            result = {"ok": True, "deleted": len(rows), "bytes": freed}
+            if idem_key:
+                idem_store(conn, device["id"], idem_key, result)
+        for stored in files:  # 事务提交后删文件；残留由 cleanup 兜底
+            unlink_file(stored)
+        notify_items_changed()
+        self.send_json(result)
+
     def v1_delete_item(self, item_id):
         device = self.require_v1_device()
         idem_key = self.headers.get("idempotency-key", "").strip()
@@ -2161,6 +2210,30 @@ class Handler(BaseHTTPRequestHandler):
                 idem_store(conn, device["id"], idem_key, result)
         notify_items_changed()
         self.send_json(result)
+
+    def v1_list_deliveries(self):
+        self.require_v1_device()
+        with db() as conn:
+            rows = conn.execute(
+                "select d.id, d.item_id, d.source_device, d.target_device, d.status, d.created_at, d.updated_at, "
+                "i.kind, i.name, i.mime, i.size, i.text, i.expires_at "
+                "from deliveries d join items i on i.id=d.item_id "
+                "where d.target_device!='windows' and d.source_device!='windows' "
+                "order by d.created_at desc, d.rowid desc limit 50"
+            ).fetchall()
+            history = [
+                dict(row)
+                for row in conn.execute(
+                    "select * from transfer_history where created_at >= ? order by created_at desc limit 50",
+                    (int(time.time()) - TRANSFER_HISTORY_TTL_SECONDS,),
+                ).fetchall()
+            ]
+        deliveries = [dict(row) for row in rows]
+        seen = set()
+        deliveries = [row for row in deliveries if not ((key := (row["source_device"], row["target_device"], row["kind"], row["name"], row["size"], row["text"] or "")) in seen or seen.add(key))]
+        seen = set()
+        history = [row for row in history if not ((key := (row["source_device"], row["target_device"], row["kind"], row["name"], row["size"], row["text"] or "")) in seen or seen.add(key))]
+        self.send_json({"deliveries": deliveries, "history": history})
 
     def v1_ack_delivery(self, delivery_id):
         device = self.require_v1_device()

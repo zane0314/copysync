@@ -1132,6 +1132,84 @@ class V1Case(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertEqual(body["error"]["code"], "not_found")
 
+    def test_v1_list_items(self):
+        token, dev = self.login_device("ListWeb", "web")
+        item = self.v1_post_text(token, "list-probe")
+        s, b = self.raw_get("/api/v1/items", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        entry = next(i for i in b["items"] if i["id"] == item["id"])
+        self.assertEqual(entry["text"], "list-probe")
+        self.assertIn("pinned", entry)
+        self.assertIn("target_device", entry)
+        self.assertNotIn("stored_name", entry)  # 不泄露内部存储字段
+
+    def test_v1_list_items_requires_auth(self):
+        s, b = self.raw_get("/api/v1/items")
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "unauthorized")
+
+    def test_v1_list_items_excludes_web_invisible(self):
+        token, dev = self.login_device("ListWebHidden", "web")
+        now = int(time.time())
+        with app.db() as conn:
+            conn.execute(
+                "insert into items(id,kind,name,mime,size,text,created_at,expires_at,source_device,target_device,web_visible) values(?,?,?,?,?,?,?,?,?,?,?)",
+                ("v1-invisible", "text", "文本", "text/plain", 3, "hid", now, now + 300, "web", "android", 0),
+            )
+        try:
+            s, b = self.raw_get("/api/v1/items", headers=self.auth(token))
+            self.assertEqual(s, 200)
+            self.assertNotIn("v1-invisible", [i["id"] for i in b["items"]])
+        finally:
+            with app.db() as conn:
+                conn.execute("delete from items where id='v1-invisible'")
+
+    def test_v1_list_deliveries_with_history(self):
+        token_src, dev_src = self.login_device("DlSrc", "web")
+        token_dst, dev_dst = self.login_device("DlDst", "android")
+        item = self.v1_post_text(token_src, "dl probe", {"target_device": dev_dst["id"]})
+        s, b = self.raw_get("/api/v1/deliveries", headers=self.auth(token_src))
+        self.assertEqual(s, 200)
+        row = next(x for x in b["deliveries"] if x["item_id"] == item["id"])
+        self.assertEqual(row["status"], "waiting")
+        self.assertEqual(row["target_device"], dev_dst["id"])
+        self.assertEqual(row["kind"], "text")
+        self.assertEqual(row["text"], "dl probe")
+        self.assertIn("history", b)
+        # 与旧 /api/transfers 同语义：相同内容的投递折叠为一条
+        self.v1_post_text(token_src, "dl probe", {"target_device": dev_dst["id"]})
+        s, b = self.raw_get("/api/v1/deliveries", headers=self.auth(token_src))
+        rows = [x for x in b["deliveries"] if x["text"] == "dl probe"]
+        self.assertEqual(len(rows), 1)
+
+    def test_v1_list_deliveries_requires_auth(self):
+        s, b = self.raw_get("/api/v1/deliveries")
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "unauthorized")
+
+    def test_v1_clear_temp_preserves_pinned_and_records_tombstones(self):
+        token, dev = self.login_device("ClearWeb", "web")
+        keep = self.v1_post_text(token, "keep me")
+        drop = self.v1_post_text(token, "drop me")
+        s, b = self.raw_patch(f"/api/v1/items/{keep['id']}", {"pinned": True}, headers=self.auth(token))
+        self.assertEqual(s, 200)
+        s, b = self.raw_post("/api/v1/items/clear-temp", {}, headers=self.auth(token))
+        self.assertEqual(s, 200)
+        self.assertGreaterEqual(b["deleted"], 1)
+        self.assertIn("bytes", b)
+        s, b = self.raw_get(f"/api/v1/items/{keep['id']}", headers=self.auth(token))
+        self.assertEqual(s, 200)
+        s, b = self.raw_get(f"/api/v1/items/{drop['id']}", headers=self.auth(token))
+        self.assertEqual(s, 404)
+        s, b = self.raw_get("/api/v1/sync?cursor=0", headers=self.auth(token))
+        tombstones = {(t["entity"], t["entity_id"]) for t in b["tombstones"]}
+        self.assertIn(("item", drop["id"]), tombstones)
+
+    def test_v1_clear_temp_requires_auth(self):
+        s, b = self.raw_post("/api/v1/items/clear-temp", {})
+        self.assertEqual(s, 401)
+        self.assertEqual(b["error"]["code"], "unauthorized")
+
     def test_migrate_v1_creates_tables_and_is_repeatable(self):
         with app.db() as conn:
             app.migrate_v1(conn)
