@@ -106,6 +106,8 @@ class Item {
     this.size = 0,
     this.createdAt = 0,
     this.expiresAt = 0,
+    this.pinned = false,
+    this.note = '',
   });
 
   factory Item.fromJson(Map<String, Object?> json) => Item(
@@ -116,7 +118,10 @@ class Item {
         mime: json['mime'] as String? ?? '',
         size: (json['size'] as num?)?.toInt() ?? 0,
         createdAt: (json['created_at'] as num?)?.toInt() ?? 0,
+        // 图钉条目 expires_at 为 null。
         expiresAt: (json['expires_at'] as num?)?.toInt() ?? 0,
+        pinned: json['pinned'] == 1 || json['pinned'] == true,
+        note: json['note'] as String? ?? '',
         sourceDevice: json['source_device'] as String? ?? '',
         targetDevice: json['target_device'] as String? ?? '',
       );
@@ -129,8 +134,74 @@ class Item {
   final int size;
   final int createdAt;
   final int expiresAt;
+  final bool pinned;
+  final String note;
   final String sourceDevice;
   final String targetDevice;
+}
+
+/// 一次定向投递（对应服务端 deliveries 表行）。
+class Delivery {
+  Delivery({
+    required this.id,
+    required this.itemId,
+    required this.sourceDevice,
+    required this.targetDevice,
+    required this.status,
+    this.createdAt = 0,
+    this.updatedAt = 0,
+  });
+
+  factory Delivery.fromJson(Map<String, Object?> json) => Delivery(
+        id: json['id'] as String? ?? '',
+        itemId: json['item_id'] as String? ?? '',
+        sourceDevice: json['source_device'] as String? ?? '',
+        targetDevice: json['target_device'] as String? ?? '',
+        status: json['status'] as String? ?? '',
+        createdAt: (json['created_at'] as num?)?.toInt() ?? 0,
+        updatedAt: (json['updated_at'] as num?)?.toInt() ?? 0,
+      );
+
+  final String id;
+  final String itemId;
+  final String sourceDevice;
+  final String targetDevice;
+  final String status;
+  final int createdAt;
+  final int updatedAt;
+}
+
+/// 容量与限制（`GET /api/v1/usage`）。
+class UsageInfo {
+  UsageInfo({
+    required this.tempBytes,
+    required this.pinnedBytes,
+    required this.totalBytes,
+    required this.pinnedLimit,
+    required this.tempLimit,
+    required this.maxFileBytes,
+  });
+
+  factory UsageInfo.fromJson(Map<String, Object?> json) {
+    final limits = (json['limits'] as Map?)?.cast<String, Object?>() ?? {};
+    int intOf(Map<String, Object?> map, String key) =>
+        (map[key] as num?)?.toInt() ?? 0;
+    return UsageInfo(
+      tempBytes: intOf(json, 'temp_bytes'),
+      pinnedBytes: intOf(json, 'pinned_bytes'),
+      totalBytes: intOf(json, 'total_bytes'),
+      pinnedLimit: intOf(limits, 'pinned'),
+      tempLimit: intOf(limits, 'temp'),
+      maxFileBytes: intOf(limits, 'max_file'),
+    );
+  }
+
+  final int tempBytes;
+  final int pinnedBytes;
+  final int totalBytes;
+  final int pinnedLimit;
+  final int tempLimit;
+  final int maxFileBytes;
 }
 
 /// `/api/v1` 客户端，直接用 dart:io HttpClient，不引入第三方网络库。
@@ -298,6 +369,82 @@ class ApiClient {
     } finally {
       client.close();
     }
+  }
+
+  /// 撤销当前 token（服务端失败时调用方自行决定本地清理策略）。
+  Future<void> logout() => _request('POST', '/api/v1/auth/logout');
+
+  /// 图钉、备注和有效期变更（ttl 为相对秒数，服务端 clamp 到 300..7 天）。
+  Future<Item> patchItem(
+    String id, {
+    bool? pinned,
+    String? note,
+    int? ttl,
+    String? idemKey,
+  }) async {
+    final body = await _request(
+      'PATCH',
+      '/api/v1/items/$id',
+      jsonBody: {
+        if (pinned != null) 'pinned': pinned,
+        if (note != null) 'note': note,
+        if (ttl != null) 'ttl': ttl,
+      },
+      headers: {
+        if (idemKey != null && idemKey.isNotEmpty) 'Idempotency-Key': idemKey,
+      },
+    );
+    return Item.fromJson(body['item'] as Map<String, Object?>);
+  }
+
+  /// 删除项目并记录墓碑。
+  Future<void> deleteItem(String id, {String? idemKey}) => _request(
+        'DELETE',
+        '/api/v1/items/$id',
+        headers: {
+          if (idemKey != null && idemKey.isNotEmpty) 'Idempotency-Key': idemKey,
+        },
+      );
+
+  /// 定向发送到目标设备。
+  Future<Delivery> createDelivery(
+    String itemId, {
+    required String targetDevice,
+    String? idemKey,
+  }) async {
+    final body = await _request(
+      'POST',
+      '/api/v1/items/$itemId/deliveries',
+      jsonBody: {'target_device': targetDevice},
+      headers: {
+        if (idemKey != null && idemKey.isNotEmpty) 'Idempotency-Key': idemKey,
+      },
+    );
+    return Delivery.fromJson(body['delivery'] as Map<String, Object?>);
+  }
+
+  /// 收件确认（只能由目标设备的 token 调用；status 为
+  /// waiting/delivered/downloaded/copied/failed）。
+  Future<Delivery> ackDelivery(
+    String deliveryId, {
+    String status = 'delivered',
+    String? idemKey,
+  }) async {
+    final body = await _request(
+      'POST',
+      '/api/v1/deliveries/$deliveryId/ack',
+      jsonBody: {'status': status},
+      headers: {
+        if (idemKey != null && idemKey.isNotEmpty) 'Idempotency-Key': idemKey,
+      },
+    );
+    return Delivery.fromJson(body['delivery'] as Map<String, Object?>);
+  }
+
+  /// 容量与限制。
+  Future<UsageInfo> usage() async {
+    final body = await _request('GET', '/api/v1/usage');
+    return UsageInfo.fromJson(body);
   }
 
   static String _basename(String path) {

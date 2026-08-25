@@ -271,4 +271,114 @@ void main() {
       );
     });
   });
+
+  group('deliveries/ack', () {
+    test('createDelivery 定向发送并解析 delivery，携带幂等键', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final item = await client.createTextItem('定向内容');
+      final delivery = await client.createDelivery(item.id,
+          targetDevice: 'dev-1', idemKey: 'k-dlv');
+      expect(delivery.itemId, item.id);
+      expect(delivery.sourceDevice, 'dev-1');
+      expect(delivery.targetDevice, 'dev-1');
+      expect(delivery.status, 'waiting');
+      final req = server.received.last;
+      expect(req.uri.path, '/api/v1/items/${item.id}/deliveries');
+      expect(req.headers.value('idempotency-key'), 'k-dlv');
+    });
+
+    test('createDelivery 目标不存在抛出 404 device_not_found', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final item = await client.createTextItem('x');
+      await expectLater(
+        () => client.createDelivery(item.id, targetDevice: 'ghost'),
+        throwsA(isA<ApiException>()
+            .having((e) => e.status, 'status', 404)
+            .having((e) => e.code, 'code', 'device_not_found')),
+      );
+    });
+
+    test('ackDelivery 更新状态；非目标设备抛出 403 device_mismatch', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final item = await client.createTextItem('x');
+      final delivery =
+          await client.createDelivery(item.id, targetDevice: 'dev-1');
+      final acked =
+          await client.ackDelivery(delivery.id, status: 'downloaded');
+      expect(acked.id, delivery.id);
+      expect(acked.status, 'downloaded');
+      expect(server.received.last.uri.path,
+          '/api/v1/deliveries/${delivery.id}/ack');
+
+      // 另一设备的投递：本 token（dev-1）不能确认。
+      server.deliveriesById['dlv-other'] = {
+        'id': 'dlv-other',
+        'item_id': item.id,
+        'source_device': 'dev-9',
+        'target_device': 'dev-9',
+        'status': 'waiting',
+        'created_at': 1,
+        'updated_at': 1,
+      };
+      await expectLater(
+        () => client.ackDelivery('dlv-other'),
+        throwsA(isA<ApiException>()
+            .having((e) => e.status, 'status', 403)
+            .having((e) => e.code, 'code', 'device_mismatch')),
+      );
+    });
+  });
+
+  group('patchItem/deleteItem/usage/logout', () {
+    test('patchItem 图钉与备注，解析 pinned/note 字段', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final item = await client.createTextItem('pin me');
+      expect(item.pinned, isFalse);
+      final patched =
+          await client.patchItem(item.id, pinned: true, note: '重要');
+      expect(patched.pinned, isTrue);
+      expect(patched.note, '重要');
+      expect(server.received.last.method, 'PATCH');
+    });
+
+    test('patchItem ttl 续期更新 expiresAt', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final item = await client.createTextItem('renew me');
+      final renewed = await client.patchItem(item.id, ttl: 7 * 86400);
+      expect(renewed.expiresAt, 1000000 + 7 * 86400);
+    });
+
+    test('deleteItem 删除并产生墓碑；重复删除抛 404', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final item = await client.createTextItem('bye');
+      await client.deleteItem(item.id);
+      expect(server.itemsById, isEmpty);
+      final page = await client.sync(0);
+      expect(page.tombstones.map((t) => t.entityId), contains(item.id));
+      await expectLater(
+        () => client.deleteItem(item.id),
+        throwsA(isA<ApiException>()
+            .having((e) => e.status, 'status', 404)
+            .having((e) => e.code, 'code', 'item_not_found')),
+      );
+    });
+
+    test('usage 解析容量与上限', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      final usage = await client.usage();
+      expect(usage.tempBytes, 2048);
+      expect(usage.pinnedBytes, 1024);
+      expect(usage.totalBytes, 3072);
+      expect(usage.tempLimit, 2097152);
+      expect(usage.pinnedLimit, 1048576);
+      expect(usage.maxFileBytes, 10485760);
+    });
+
+    test('logout 调用服务端撤销端点', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      await client.logout();
+      expect(server.received.last.uri.path, '/api/v1/auth/logout');
+      expect(server.received.last.method, 'POST');
+    });
+  });
 }

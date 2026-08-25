@@ -34,6 +34,35 @@ class AppState extends ChangeNotifier {
   String? _pendingIdemKey;
   final _random = Random();
 
+  // ---- 传输历史 ----
+  /// 本机已知详情的投递（createDelivery/ackDelivery 返回）。
+  List<Delivery> deliveries = [];
+
+  /// sync 中观察到但本地无详情的投递 id（v1 无投递详情接口，
+  /// 仅能确认存在与变化时间）。
+  List<String> observedDeliveryIds = [];
+
+  // ---- 网盘 ----
+  UsageInfo? usageInfo;
+
+  /// 按条目 id 的局部操作状态（续期/删除/图钉/定向发送/下载等）。
+  final Map<String, OpStatus> _entryOps = {};
+  final Map<String, String?> _entryErrors = {};
+
+  OpStatus entryOp(String id) => _entryOps[id] ?? OpStatus.idle;
+  String? entryError(String id) => _entryErrors[id];
+
+  /// 临时网盘条目：未指定具体目标设备的内容（v1 item_json 不返回
+  /// web_visible 字段，客户端以 target_device 区分网盘与定向传输）。
+  List<Item> get driveItems => items
+      .where((i) => i.targetDevice.isEmpty || i.targetDevice == 'all')
+      .toList();
+
+  /// 定向传输条目。
+  List<Item> get transferItems => items
+      .where((i) => i.targetDevice.isNotEmpty && i.targetDevice != 'all')
+      .toList();
+
   int get onlineDeviceCount => devices.where((d) => d.online).length;
 
   Future<bool> login({
@@ -73,18 +102,28 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    try {
+      await api.logout(); // 尽力撤销服务端 token；失败仍清本地。
+    } on ApiException {
+      // 网络失败不阻塞本地退出。
+    }
     await tokenStore.clear();
     api.token = null;
     device = null;
     devices = [];
     items = [];
+    deliveries = [];
+    observedDeliveryIds = [];
+    usageInfo = null;
+    _entryOps.clear();
+    _entryErrors.clear();
     _cursor = 0;
     loginStatus = OpStatus.idle;
     notifyListeners();
   }
 
   /// 发送文本；失败保留原数据，重试复用同一幂等键。
-  Future<bool> sendText(String text) async {
+  Future<bool> sendText(String text, {String? targetDevice}) async {
     if (sendStatus == OpStatus.loading) return false;
     final trimmed = text.trim();
     if (trimmed.isEmpty) {
@@ -100,6 +139,7 @@ class AppState extends ChangeNotifier {
     try {
       final item = await api.createTextItem(
         trimmed,
+        targetDevice: targetDevice,
         idempotencyKey: _pendingIdemKey,
       );
       _upsertItem(item);
@@ -159,6 +199,78 @@ class AppState extends ChangeNotifier {
       return false;
     }
   }
+  /// 对已有条目定向发送到目标设备（按条目防重）。
+  Future<bool> sendToDevice(String itemId, String targetDevice) =>
+      _entryCall(itemId, () async {
+        final delivery = await api.createDelivery(itemId,
+            targetDevice: targetDevice, idemKey: _newIdemKey());
+        _upsertDelivery(delivery);
+      });
+
+  /// 收件确认，更新本地投递状态。
+  Future<bool> ackDelivery(String deliveryId,
+          {String status = 'delivered'}) =>
+      _entryCall(deliveryId, () async {
+        final delivery =
+            await api.ackDelivery(deliveryId, status: status, idemKey: _newIdemKey());
+        _upsertDelivery(delivery);
+      });
+
+  /// 续期 7 天（服务端 clamp 上限）。
+  Future<bool> renewItem(String id) => _entryCall(id, () async {
+        _upsertItem(await api.patchItem(id, ttl: 7 * 86400, idemKey: _newIdemKey()));
+      });
+
+  /// 删除条目；失败保留原数据。
+  Future<bool> deleteItemById(String id) => _entryCall(id, () async {
+        await api.deleteItem(id, idemKey: _newIdemKey());
+        items.removeWhere((i) => i.id == id);
+      });
+
+  /// 图钉开关（置顶后永久保留）。
+  Future<bool> setPinned(String id, bool pinned) => _entryCall(id, () async {
+        _upsertItem(await api.patchItem(id, pinned: pinned, idemKey: _newIdemKey()));
+      });
+
+  /// 拉取容量与限制。
+  Future<void> loadUsage() async {
+    try {
+      usageInfo = await api.usage();
+      notifyListeners();
+    } on ApiException {
+      // 容量展示失败不阻塞页面；保持旧值。
+    }
+  }
+
+  /// 条目级操作模板：防重 + idle/loading/success/error + 错误消息。
+  Future<bool> _entryCall(String id, Future<void> Function() action) async {
+    if (entryOp(id) == OpStatus.loading) return false;
+    _entryOps[id] = OpStatus.loading;
+    _entryErrors[id] = null;
+    notifyListeners();
+    try {
+      await action();
+      _entryOps[id] = OpStatus.success;
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      _entryOps[id] = OpStatus.error;
+      _entryErrors[id] = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  void _upsertDelivery(Delivery delivery) {
+    final index = deliveries.indexWhere((d) => d.id == delivery.id);
+    if (index >= 0) {
+      deliveries[index] = delivery;
+    } else {
+      deliveries.add(delivery);
+    }
+    observedDeliveryIds.remove(delivery.id);
+  }
+
   Future<void> refresh() => _refresh(allowFullFallback: true);
 
   Future<void> _refresh({required bool allowFullFallback}) async {
@@ -185,6 +297,16 @@ class AppState extends ChangeNotifier {
           _upsertItem(await api.getItem(id));
         } on ApiException {
           // 详情暂时取不到（如已过期清理），跳过不阻断整体同步。
+        }
+      }
+      // 收集投递变化：v1 无投递详情接口，本地未知详情的只记录 id。
+      final knownDeliveryIds = deliveries.map((d) => d.id).toSet();
+      for (final change in page.changes) {
+        if (change.entity == 'delivery' &&
+            change.op == 'upsert' &&
+            !knownDeliveryIds.contains(change.entityId) &&
+            !observedDeliveryIds.contains(change.entityId)) {
+          observedDeliveryIds.add(change.entityId);
         }
       }
       _cursor = page.nextCursor;

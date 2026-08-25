@@ -23,10 +23,12 @@ class FakeV1Server {
   final Map<String, Map<String, Object?>> _idempotent = {};
   final Map<String, Map<String, Object?>> itemsById = {};
   final Map<String, Map<String, List<int>>> blobsById = {};
+  final Map<String, Map<String, Object?>> deliveriesById = {};
   final List<Map<String, Object?>> _changes = [];
   final List<Map<String, String>> devices = [];
   int _seq = 0;
   int _itemSeq = 0;
+  int _deliverySeq = 0;
   final List<HttpRequest> received = [];
 
   /// 与 received 对齐的原始请求体字节（multipart 断言用）。
@@ -313,6 +315,88 @@ class FakeV1Server {
       final item = itemsById[itemMatch.group(1)];
       if (item == null) return _fail(req.response, 404, 'not_found', '项目不存在');
       return _json(req.response, {'item': item});
+    }
+    if (itemMatch != null && req.method == 'PATCH') {
+      final item = itemsById[itemMatch.group(1)];
+      if (item == null) {
+        return _fail(req.response, 404, 'item_not_found', '项目不存在');
+      }
+      if (body.containsKey('pinned')) {
+        item['pinned'] = body['pinned'] == true ? 1 : 0;
+        item['expires_at'] = body['pinned'] == true ? null : 2;
+      }
+      if (body.containsKey('note')) item['note'] = body['note'];
+      if (body.containsKey('ttl')) {
+        item['expires_at'] = 1000000 + (body['ttl'] as num).toInt();
+      }
+      recordChange('item', item['id'] as String, 'upsert');
+      return _json(req.response, {'item': item});
+    }
+    if (itemMatch != null && req.method == 'DELETE') {
+      final id = itemMatch.group(1)!;
+      if (!itemsById.containsKey(id)) {
+        return _fail(req.response, 404, 'item_not_found', '项目不存在');
+      }
+      itemsById.remove(id);
+      blobsById.remove(id);
+      recordChange('item', id, 'delete');
+      return _json(req.response, {'ok': true, 'id': id});
+    }
+    final deliveriesMatch =
+        RegExp(r'^/api/v1/items/([^/]+)/deliveries$').firstMatch(path);
+    if (deliveriesMatch != null && req.method == 'POST') {
+      final item = itemsById[deliveriesMatch.group(1)];
+      if (item == null) {
+        return _fail(req.response, 404, 'item_not_found', '项目不存在');
+      }
+      final target = '${body['target_device'] ?? ''}';
+      if (target.isEmpty) {
+        return _fail(req.response, 400, 'bad_request', '缺少 target_device');
+      }
+      // 登录设备固定为 dev-1；其余目标必须出现在设备列表。
+      if (target != 'dev-1' && !devices.any((d) => d['id'] == target)) {
+        return _fail(req.response, 404, 'device_not_found', '目标设备不存在');
+      }
+      _deliverySeq += 1;
+      final now = 1000000 + _deliverySeq;
+      final delivery = <String, Object?>{
+        'id': 'dlv-$_deliverySeq',
+        'item_id': item['id'],
+        'source_device': 'dev-1',
+        'target_device': target,
+        'status': target == 'web' ? 'delivered' : 'waiting',
+        'created_at': now,
+        'updated_at': now,
+      };
+      deliveriesById[delivery['id'] as String] = delivery;
+      recordChange('delivery', delivery['id'] as String, 'upsert');
+      return _json(req.response, {'delivery': delivery});
+    }
+    final ackMatch =
+        RegExp(r'^/api/v1/deliveries/([^/]+)/ack$').firstMatch(path);
+    if (ackMatch != null && req.method == 'POST') {
+      final delivery = deliveriesById[ackMatch.group(1)];
+      if (delivery == null) {
+        return _fail(req.response, 404, 'delivery_not_found', '投递不存在');
+      }
+      if (delivery['target_device'] != 'dev-1') {
+        return _fail(req.response, 403, 'device_mismatch', '只能由目标设备确认');
+      }
+      final status = '${body['status'] ?? 'delivered'}';
+      delivery['status'] = status;
+      recordChange('delivery', delivery['id'] as String, 'upsert');
+      return _json(req.response, {'delivery': delivery});
+    }
+    if (path == '/api/v1/usage' && req.method == 'GET') {
+      return _json(req.response, {
+        'temp_bytes': 2048,
+        'pinned_bytes': 1024,
+        'total_bytes': 3072,
+        'limits': {'pinned': 1048576, 'temp': 2097152, 'max_file': 10485760},
+      });
+    }
+    if (path == '/api/v1/auth/logout' && req.method == 'POST') {
+      return _json(req.response, {'ok': true});
     }
     return _fail(req.response, 404, 'not_found', '接口不存在');
   }

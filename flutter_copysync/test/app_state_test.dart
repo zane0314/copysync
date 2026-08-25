@@ -253,4 +253,141 @@ void main() {
       state.api.token = 'cps_tok_1';
     });
   });
+
+  group('传输与网盘操作', () {
+    setUp(() async {
+      await loginOk();
+    });
+
+    test('sendToDevice 创建投递记录，状态流转 success', () async {
+      await state.sendText('定向');
+      final item = state.items.single;
+      final ok = await state.sendToDevice(item.id, 'dev-1');
+      expect(ok, isTrue);
+      expect(state.deliveries.single.itemId, item.id);
+      expect(state.deliveries.single.targetDevice, 'dev-1');
+      expect(state.entryOp(item.id), OpStatus.success);
+    });
+
+    test('sendToDevice 进行中防重：同一条目第二次被拒', () async {
+      await state.sendText('定向');
+      final item = state.items.single;
+      final first = state.sendToDevice(item.id, 'dev-1');
+      expect(state.entryOp(item.id), OpStatus.loading);
+      final second = await state.sendToDevice(item.id, 'dev-1');
+      expect(second, isFalse);
+      expect(await first, isTrue);
+      final posts = server.received
+          .where((r) => r.uri.path.endsWith('/deliveries'))
+          .length;
+      expect(posts, 1);
+    });
+
+    test('sendToDevice 失败：状态 error、记录原因、可重试', () async {
+      await state.sendText('定向');
+      final item = state.items.single;
+      final ok = await state.sendToDevice(item.id, 'ghost');
+      expect(ok, isFalse);
+      expect(state.entryOp(item.id), OpStatus.error);
+      expect(state.entryError(item.id), '目标设备不存在');
+      expect(state.deliveries, isEmpty);
+      final retry = await state.sendToDevice(item.id, 'dev-1');
+      expect(retry, isTrue);
+    });
+
+    test('ackDelivery 更新本地投递状态', () async {
+      await state.sendText('定向');
+      final item = state.items.single;
+      await state.sendToDevice(item.id, 'dev-1');
+      final delivery = state.deliveries.single;
+      final ok = await state.ackDelivery(delivery.id, status: 'downloaded');
+      expect(ok, isTrue);
+      expect(state.deliveries.single.status, 'downloaded');
+    });
+
+    test('refresh 收集 sync 中出现的 delivery 变化', () async {
+      await state.sendText('定向');
+      await state.sendToDevice(state.items.single.id, 'dev-1');
+      await state.refresh();
+      expect(state.deliveries, hasLength(1)); // 已知详情的不重复
+      // 模拟其他设备产生的投递：只有 id 可从 sync 得知。
+      server.deliveriesById['dlv-ext'] = {
+        'id': 'dlv-ext',
+        'item_id': 'item-ext',
+        'source_device': 'dev-9',
+        'target_device': 'dev-1',
+        'status': 'waiting',
+        'created_at': 1,
+        'updated_at': 1,
+      };
+      server.recordChange('delivery', 'dlv-ext', 'upsert');
+      await state.refresh();
+      expect(state.observedDeliveryIds, contains('dlv-ext'));
+    });
+
+    test('renewItem 续期成功更新 expiresAt', () async {
+      await state.sendText('续期');
+      final item = state.items.single;
+      final ok = await state.renewItem(item.id);
+      expect(ok, isTrue);
+      expect(state.items.single.expiresAt, 1000000 + 7 * 86400);
+      expect(state.entryOp(item.id), OpStatus.success);
+    });
+
+    test('deleteItemById 成功移除条目；失败保留并报错', () async {
+      await state.sendText('删除我');
+      final item = state.items.single;
+      final ok = await state.deleteItemById(item.id);
+      expect(ok, isTrue);
+      expect(state.items, isEmpty);
+
+      await state.sendText('保留');
+      final kept = state.items.single;
+      server.itemsById.remove(kept.id); // 服务端已不存在 → 404
+      final failed = await state.deleteItemById(kept.id);
+      expect(failed, isFalse);
+      expect(state.items.single.id, kept.id); // 原数据保留
+      expect(state.entryOp(kept.id), OpStatus.error);
+      expect(state.entryError(kept.id), isNotNull);
+    });
+
+    test('setPinned 切换图钉状态', () async {
+      await state.sendText('置顶');
+      final item = state.items.single;
+      expect(item.pinned, isFalse);
+      final ok = await state.setPinned(item.id, true);
+      expect(ok, isTrue);
+      expect(state.items.single.pinned, isTrue);
+    });
+
+    test('driveItems 排除定向传输，transferItems 只含定向', () async {
+      await state.sendText('网盘内容');
+      await state.sendText('定向内容', targetDevice: 'dev-1');
+      expect(state.driveItems.map((i) => i.text), ['网盘内容']);
+      expect(state.transferItems.map((i) => i.text), ['定向内容']);
+    });
+
+    test('loadUsage 拉取容量信息', () async {
+      await state.loadUsage();
+      expect(state.usageInfo?.totalBytes, 3072);
+    });
+
+    test('logout 撤销服务端 token 并清空本地状态', () async {
+      await state.sendText('x');
+      await state.logout();
+      expect(state.isLoggedIn, isFalse);
+      expect(state.items, isEmpty);
+      expect(state.deliveries, isEmpty);
+      expect(server.received.any((r) => r.uri.path == '/api/v1/auth/logout'),
+          isTrue);
+    });
+
+    test('logout 服务端不可达时仍清空本地状态', () async {
+      await server.stop();
+      await state.logout();
+      expect(state.isLoggedIn, isFalse);
+      server = FakeV1Server();
+      state.api.baseUrl = await server.start();
+    });
+  });
 }
