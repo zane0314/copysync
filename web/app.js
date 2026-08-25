@@ -111,8 +111,13 @@ async function api(path, opts = {}) {
   if (!resp.ok) {
     const message = (data && data.error && data.error.message) || `请求失败（HTTP ${resp.status}）`;
     if (resp.status === 401 && !path.startsWith('/api/v1/auth/login')) {
-      showLogin();
-      throw new Error('登录已失效，请重新登录');
+      const code = data && data.error && data.error.code;
+      // invalid_credentials 是修改密码等表单的可展示输入错误，不是会话失效；
+      // 仅 token 失效/未认证才强制回登录页。
+      if (code !== 'invalid_credentials') {
+        showLogin();
+        throw new Error('登录已失效，请重新登录');
+      }
     }
     throw new Error(message);
   }
