@@ -380,6 +380,29 @@ class ApiClient {
   /// 撤销当前 token（服务端失败时调用方自行决定本地清理策略）。
   Future<void> logout() => _request('POST', '/api/v1/auth/logout');
 
+  /// 修改密码：成功后服务端撤销全部设备 Token（含当前），
+  /// 调用方必须清空本地登录态并回到登录页。
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) =>
+      _request('POST', '/api/v1/auth/password', jsonBody: {
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      });
+
+  /// 彻底清空全部内容（含已固定），返回 {"deleted","bytes"}。
+  Future<Map<String, Object?>> clearAll({String? idemKey}) async {
+    return _request(
+      'POST',
+      '/api/v1/items/clear-all',
+      jsonBody: const {},
+      headers: {
+        if (idemKey != null && idemKey.isNotEmpty) 'Idempotency-Key': idemKey,
+      },
+    );
+  }
+
   /// 图钉、备注和有效期变更（ttl 为相对秒数，服务端 clamp 到 300..7 天）。
   Future<Item> patchItem(
     String id, {
@@ -452,6 +475,18 @@ class ApiClient {
     final body = await _request('GET', '/api/v1/usage');
     return UsageInfo.fromJson(body);
   }
+
+  /// 投递列表（接收通知与下载对账用；响应含 history 字段，这里只取 deliveries）。
+  Future<List<Delivery>> listDeliveries() async {
+    final body = await _request('GET', '/api/v1/deliveries');
+    return (body['deliveries'] as List<Object?>)
+        .map((d) => Delivery.fromJson(d as Map<String, Object?>))
+        .toList();
+  }
+
+  /// 条目内容下载地址（Android 端交给 DownloadManager 时使用）。
+  String contentUrl(String id, {String variant = 'original'}) =>
+      '$baseUrl/api/v1/items/$id/content?variant=$variant';
 
   static String _basename(String path) {
     final normalized = path.replaceAll('\\', '/');

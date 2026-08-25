@@ -183,6 +183,9 @@ void main() {
       await tester.tap(find.byIcon(Icons.settings));
       await tester.pump();
       await tester.pump();
+      await tester.scrollUntilVisible(find.byKey(const Key('logoutButton')),
+          160,
+          scrollable: find.byType(Scrollable).last);
       expect(find.byKey(const Key('logoutButton')), findsOneWidget);
     });
   });

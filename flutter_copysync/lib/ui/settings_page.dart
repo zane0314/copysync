@@ -85,6 +85,12 @@ class _SettingsPageState extends State<SettingsPage> {
               _loginItemTile(),
               _cacheTile(),
               _updateTile(),
+              const SizedBox(height: AppSpacing.lg),
+              _sectionTitle('账号'),
+              _passwordTile(),
+              const SizedBox(height: AppSpacing.lg),
+              _sectionTitle('危险操作'),
+              _clearAllTile(),
               const SizedBox(height: AppSpacing.xl),
               Center(
                 child: OutlinedButton.icon(
@@ -282,6 +288,132 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
       ],
     );
+  }
+
+  /// 修改密码：对话框输入当前/新密码；成功后服务端撤销全部 Token，
+  /// AppState 自动退出登录回到登录页。
+  Widget _passwordTile() {
+    return _actionTile(
+      icon: Icons.lock_outline,
+      title: '修改密码',
+      subtitle: state.passwordStatus == OpStatus.error
+          ? state.passwordError
+          : '修改成功后所有设备都需要重新登录',
+      buttonKey: const Key('changePasswordButton'),
+      buttonLabel:
+          state.passwordStatus == OpStatus.loading ? '修改中' : '修改密码',
+      onPressed: state.passwordStatus == OpStatus.loading
+          ? null
+          : () => _showPasswordDialog(),
+    );
+  }
+
+  Future<void> _showPasswordDialog() async {
+    final currentController = TextEditingController();
+    final newController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('修改密码'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const Key('currentPasswordField'),
+              controller: currentController,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: '当前密码'),
+            ),
+            TextField(
+              key: const Key('newPasswordField'),
+              controller: newController,
+              obscureText: true,
+              decoration:
+                  const InputDecoration(labelText: '新密码（至少 12 个字符）'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('confirmPasswordButton'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('确认修改'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final ok = await state.changePassword(
+        currentController.text, newController.text);
+    if (!ok && mounted) {
+      setState(() {}); // passwordError 经 ListenableBuilder 刷新到副标题
+    }
+  }
+
+  /// 彻底清空：两个连续确认对话框（二次确认），都确认才执行。
+  Widget _clearAllTile() {
+    return _actionTile(
+      icon: Icons.delete_forever_outlined,
+      title: '彻底清空全部内容',
+      subtitle: switch (state.clearAllStatus) {
+        OpStatus.success => '已清空 ${state.clearAllDeleted} 项',
+        OpStatus.error => state.clearAllError,
+        _ => '删除全部内容（含已固定），不可恢复，需二次确认',
+      },
+      buttonKey: const Key('clearAllButton'),
+      buttonLabel: state.clearAllStatus == OpStatus.loading ? '清空中' : '彻底清空',
+      onPressed: state.clearAllStatus == OpStatus.loading
+          ? null
+          : () => _confirmClearAll(),
+    );
+  }
+
+  Future<void> _confirmClearAll() async {
+    final first = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('彻底清空全部内容？'),
+        content: const Text('将删除全部内容（含已固定），不可恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('clearAllConfirm1'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('继续'),
+          ),
+        ],
+      ),
+    );
+    if (first != true || !mounted) return;
+    final second = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('再次确认'),
+        content: const Text('此操作不可撤销，真的要清空全部内容吗？'),
+        actions: [
+          TextButton(
+            key: const Key('clearAllCancel2'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('clearAllConfirm2'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('确认清空'),
+          ),
+        ],
+      ),
+    );
+    if (second != true || !mounted) return;
+    await state.clearAllItems();
   }
 
   Widget _unsupported(String title, String message) {

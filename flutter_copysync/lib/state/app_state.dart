@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
 import '../api/api_client.dart';
+import '../bridge/android_bridge_models.dart';
+import '../bridge/android_host.dart';
 import 'token_store.dart';
 
 /// 每个操作的独立状态：idle/loading/success/error。
@@ -11,10 +14,14 @@ enum OpStatus { idle, loading, success, error }
 
 /// 单一 ChangeNotifier 状态体系：认证 + 收件箱（设备/项目/游标）。
 class AppState extends ChangeNotifier {
-  AppState({required this.api, required this.tokenStore});
+  AppState({required this.api, required this.tokenStore, this.android});
 
   final ApiClient api;
   final TokenStore tokenStore;
+
+  /// Android 原生能力（通知/后台服务/下载/分享/转存）；非 Android 平台为 null。
+  /// main() 在创建 AppState 后按平台注入。
+  AndroidHost? android;
 
   // ---- 认证 ----
   OpStatus loginStatus = OpStatus.idle;
@@ -48,8 +55,22 @@ class AppState extends ChangeNotifier {
   /// 仅能确认存在与变化时间）。
   List<String> observedDeliveryIds = [];
 
+  // ---- Android ----
+  /// 已发过接收通知的投递 id（避免每次 sync 重复弹通知）。
+  final Set<String> notifiedDeliveryIds = {};
+
+  /// 最近一次下载对账结果（重启恢复语义）。
+  List<AndroidDownloadRecord> downloadRecords = [];
+
   // ---- 网盘 ----
   UsageInfo? usageInfo;
+
+  // ---- 设置：修改密码 / 彻底清空 ----
+  OpStatus passwordStatus = OpStatus.idle;
+  String? passwordError;
+  OpStatus clearAllStatus = OpStatus.idle;
+  String? clearAllError;
+  int clearAllDeleted = 0;
 
   /// 按条目 id 的局部操作状态（续期/删除/图钉/定向发送/下载等）。
   final Map<String, OpStatus> _entryOps = {};
@@ -100,6 +121,7 @@ class AppState extends ChangeNotifier {
       restoredDeviceId = result.device.id;
       loginStatus = OpStatus.success;
       notifyListeners();
+      _androidSessionStart();
       return true;
     } on ApiException catch (e) {
       loginStatus = OpStatus.error;
@@ -115,6 +137,7 @@ class AppState extends ChangeNotifier {
       api.token = token;
       restoredDeviceId = await tokenStore.readDeviceId();
       notifyListeners();
+      _androidSessionStart();
     }
   }
 
@@ -137,7 +160,97 @@ class AppState extends ChangeNotifier {
     _entryErrors.clear();
     _cursor = 0;
     loginStatus = OpStatus.idle;
+    passwordStatus = OpStatus.idle;
+    passwordError = null;
+    clearAllStatus = OpStatus.idle;
+    clearAllError = null;
+    notifiedDeliveryIds.clear();
+    downloadRecords = [];
+    if (android != null) _ignoreAndroid(android!.backgroundStop());
     notifyListeners();
+  }
+
+  /// 登录/恢复会话后的 Android 侧启动：前台服务保活 + 下载对账（重启恢复）。
+  void _androidSessionStart() {
+    final host = android;
+    if (host == null) return;
+    _ignoreAndroid(host.backgroundStart(mode: 'realtime'));
+    _ignoreAndroid(() async {
+      final result = await host.downloadReconcile();
+      if (result.ok && result.value != null) {
+        downloadRecords = result.value!;
+        notifyListeners();
+      }
+    }());
+  }
+
+  Future<void> _ignoreAndroid(Future<Object?> future) async {
+    try {
+      await future;
+    } catch (_) {
+      // 桥不可用不阻断主流程。
+    }
+  }
+
+  /// 收到新投递时系统通知（旧版接收通知语义）：只对本机目标且未通知过的。
+  Future<void> _androidNotifyNewDeliveries() async {
+    final host = android;
+    final me = currentDeviceId;
+    if (host == null || me == null) return;
+    List<Delivery> list;
+    try {
+      list = await api.listDeliveries();
+    } on ApiException {
+      return; // 通知失败不阻断同步
+    }
+    for (final d in list) {
+      if (d.targetDevice != me ||
+          d.status != 'waiting' ||
+          notifiedDeliveryIds.contains(d.id)) {
+        continue;
+      }
+      notifiedDeliveryIds.add(d.id);
+      _ignoreAndroid(host.notifyShow(
+          title: 'CopySync 收到新内容', body: '来自 ${deviceDisplayName(d.sourceDevice)}', id: d.id));
+    }
+  }
+
+  /// Android 接收文件：DownloadManager 入队到 Download/CopySync 并 ack
+  /// （下载完成通知由原生下载接收器负责）。无对应投递时返回 false。
+  Future<bool> receiveItemFile(Item item) async {
+    final host = android;
+    final me = currentDeviceId;
+    if (host == null || me == null) return false;
+    final list = await api.listDeliveries();
+    Delivery? delivery;
+    for (final d in list) {
+      if (d.itemId == item.id && d.targetDevice == me) delivery = d;
+    }
+    if (delivery == null) return false;
+    final enqueued = await host.downloadEnqueue(
+      url: api.contentUrl(item.id),
+      deliveryId: delivery.id,
+      name: item.name,
+      mime: item.mime,
+      headers: {if (api.token != null) 'Authorization': 'Bearer ${api.token}'},
+    );
+    if (!enqueued.ok) return false;
+    await ackDelivery(delivery.id, status: 'downloaded');
+    return true;
+  }
+
+  /// 用系统查看器打开已接收文件（旧版 viewReceivedFile 语义）。
+  Future<bool> openReceivedItem(Item item) async {
+    final host = android;
+    if (host == null) return false;
+    final list = await api.listDeliveries();
+    String? deliveryId;
+    for (final d in list) {
+      if (d.itemId == item.id) deliveryId = d.id;
+    }
+    final result = await host.filesOpenReceived(
+        deliveryId: deliveryId, name: item.name, mime: item.mime);
+    return result.ok;
   }
 
   /// 发送文本；失败保留原数据，重试复用同一幂等键。
@@ -209,6 +322,7 @@ class AppState extends ChangeNotifier {
       _pendingIdemKey = null;
       sendStatus = OpStatus.success;
       notifyListeners();
+      _androidSaveSent(item, path);
       return true;
     } on ApiException catch (e) {
       sendStatus = OpStatus.error;
@@ -257,6 +371,50 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     } on ApiException {
       // 容量展示失败不阻塞页面；保持旧值。
+    }
+  }
+
+  /// 修改密码：成功后服务端撤销全部设备 Token（含当前），
+  /// 本地随即退出登录回到登录页。
+  Future<bool> changePassword(String current, String next) async {
+    if (passwordStatus == OpStatus.loading) return false;
+    passwordStatus = OpStatus.loading;
+    passwordError = null;
+    notifyListeners();
+    try {
+      await api.changePassword(currentPassword: current, newPassword: next);
+      passwordStatus = OpStatus.success;
+      notifyListeners();
+      await logout(); // 服务端已撤销 token；logout 的 401 被吞掉
+      return true;
+    } on ApiException catch (e) {
+      passwordStatus = OpStatus.error;
+      passwordError = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// 彻底清空全部内容（含已固定）；成功后清空本地列表。
+  Future<bool> clearAllItems() async {
+    if (clearAllStatus == OpStatus.loading) return false;
+    clearAllStatus = OpStatus.loading;
+    clearAllError = null;
+    notifyListeners();
+    try {
+      final result = await api.clearAll(idemKey: _newIdemKey());
+      clearAllDeleted = (result['deleted'] as num?)?.toInt() ?? 0;
+      items.clear();
+      deliveries.clear();
+      observedDeliveryIds.clear();
+      clearAllStatus = OpStatus.success;
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      clearAllStatus = OpStatus.error;
+      clearAllError = e.message;
+      notifyListeners();
+      return false;
     }
   }
 
@@ -331,6 +489,7 @@ class AppState extends ChangeNotifier {
       devices = await api.listDevices();
       refreshStatus = OpStatus.success;
       notifyListeners();
+      _ignoreAndroid(_androidNotifyNewDeliveries());
     } on ApiException catch (e) {
       if (e.code == 'full_sync_required' && allowFullFallback) {
         _cursor = 0;
@@ -342,6 +501,17 @@ class AppState extends ChangeNotifier {
       refreshError = e.message;
       notifyListeners();
     }
+  }
+
+  /// 发送成功后把已发送文件转存 Download/CopySync（旧版 sent: 前缀语义，
+  /// 前缀由原生侧处理）；尽力而为，失败不影响发送结果。
+  void _androidSaveSent(Item item, String path) {
+    final host = android;
+    if (host == null) return;
+    _ignoreAndroid(() async {
+      final bytes = await File(path).readAsBytes();
+      await host.filesSaveSent(itemId: item.id, name: item.name, data: bytes);
+    }());
   }
 
   void _upsertItem(Item item) {

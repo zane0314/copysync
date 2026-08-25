@@ -14,8 +14,9 @@ class FakePart {
 }
 
 /// 用 dart:io HttpServer 模拟 v1 服务端契约（见 app.py route_v1）。
-/// 支持：login、devices、sync（游标/墓碑）、items 创建（JSON 文本与
-/// multipart 文件/图片双变体）/详情/内容下载、幂等键、
+/// 支持：login、logout、修改密码、clear-all、devices、sync（游标/墓碑）、
+/// items 创建（JSON 文本与 multipart 文件/图片双变体）/详情/内容下载、
+/// 幂等键、
 /// 故障注入（forceItemStatus/forceItemCode）、登录延迟（loginDelay）、
 /// 增量游标拒绝（rejectIncrementalSync，用于 full_sync_required 回退测试）。
 class FakeV1Server {
@@ -356,6 +357,12 @@ class FakeV1Server {
     }
     final deliveriesMatch =
         RegExp(r'^/api/v1/items/([^/]+)/deliveries$').firstMatch(path);
+    if (path == '/api/v1/deliveries' && req.method == 'GET') {
+      return _json(req.response, {
+        'deliveries': deliveriesById.values.toList(),
+        'history': const <Object?>[],
+      });
+    }
     if (deliveriesMatch != null && req.method == 'POST') {
       final item = itemsById[deliveriesMatch.group(1)];
       if (item == null) {
@@ -409,6 +416,27 @@ class FakeV1Server {
     }
     if (path == '/api/v1/auth/logout' && req.method == 'POST') {
       return _json(req.response, {'ok': true});
+    }
+    if (path == '/api/v1/auth/password' && req.method == 'POST') {
+      if (body['current_password'] != password) {
+        return _fail(req.response, 401, 'invalid_credentials', '当前密码错误');
+      }
+      final next = '${body['new_password']}';
+      if (next.length < 12) {
+        return _fail(req.response, 400, 'weak_password', '新密码至少 12 个字符');
+      }
+      password = next;
+      return _json(req.response, {'ok': true});
+    }
+    if (path == '/api/v1/items/clear-all' && req.method == 'POST') {
+      final ids = itemsById.keys.toList();
+      for (final id in ids) {
+        recordChange('item', id, 'delete');
+      }
+      final deleted = ids.length;
+      itemsById.clear();
+      blobsById.clear();
+      return _json(req.response, {'ok': true, 'deleted': deleted, 'bytes': 0});
     }
     return _fail(req.response, 404, 'not_found', '接口不存在');
   }

@@ -42,6 +42,13 @@ void main() {
     await tester.pump();
   }
 
+  /// 设置页为 ListView，靠后的区块需滚动到可视区再点击。
+  Future<void> scrollToKey(WidgetTester tester, Key key) async {
+    await tester.scrollUntilVisible(find.byKey(key), 160,
+        scrollable: find.byType(Scrollable).last);
+    await tester.pump();
+  }
+
   testWidgets('设备列表显示名称平台与在线状态', (tester) async {
     await tester.runAsync(() async {
       state = await loggedInState(server);
@@ -130,10 +137,82 @@ void main() {
       state = await loggedInState(server);
       await pumpShell(tester, state, bridge: bridge);
       await openSettings(tester);
+      await scrollToKey(tester, const Key('logoutButton'));
       await tester.tap(find.byKey(const Key('logoutButton')));
       await Future<void>.delayed(const Duration(milliseconds: 100));
       await tester.pump();
       expect(find.byKey(const Key('loginButton')), findsOneWidget);
+    });
+  });
+
+  testWidgets('修改密码成功后全设备下线回到登录页', (tester) async {
+    await tester.runAsync(() async {
+      state = await loggedInState(server);
+      await pumpShell(tester, state, bridge: bridge);
+      await openSettings(tester);
+      await scrollToKey(tester, const Key('changePasswordButton'));
+      await tester.tap(find.byKey(const Key('changePasswordButton')));
+      await tester.pump();
+      await tester.enterText(
+          find.byKey(const Key('currentPasswordField')), 'dev-pw-123');
+      await tester.enterText(
+          find.byKey(const Key('newPasswordField')), 'new-password-456');
+      await tester.tap(find.byKey(const Key('confirmPasswordButton')));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await tester.pump();
+      expect(server.password, 'new-password-456');
+      expect(find.byKey(const Key('loginButton')), findsOneWidget);
+    });
+  });
+
+  testWidgets('修改密码当前密码错误显示原因且保持登录', (tester) async {
+    await tester.runAsync(() async {
+      state = await loggedInState(server);
+      await pumpShell(tester, state, bridge: bridge);
+      await openSettings(tester);
+      await scrollToKey(tester, const Key('changePasswordButton'));
+      await tester.tap(find.byKey(const Key('changePasswordButton')));
+      await tester.pump();
+      await tester.enterText(
+          find.byKey(const Key('currentPasswordField')), 'wrong-password');
+      await tester.enterText(
+          find.byKey(const Key('newPasswordField')), 'new-password-456');
+      await tester.tap(find.byKey(const Key('confirmPasswordButton')));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await tester.pump();
+      expect(server.password, 'dev-pw-123');
+      expect(state.isLoggedIn, isTrue);
+      expect(find.textContaining('当前密码错误'), findsOneWidget);
+    });
+  });
+
+  testWidgets('彻底清空需二次确认且确认后列表清空', (tester) async {
+    await tester.runAsync(() async {
+      state = await loggedInState(server);
+      await state.sendText('待清空内容');
+      await pumpShell(tester, state, bridge: bridge);
+      await openSettings(tester);
+      // 第一次确认后、第二次取消：内容不动
+      await scrollToKey(tester, const Key('clearAllButton'));
+      await tester.tap(find.byKey(const Key('clearAllButton')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('clearAllConfirm1')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('clearAllCancel2')));
+      await tester.pump();
+      expect(server.itemsById, isNotEmpty);
+      // 两次都确认：清空
+      await scrollToKey(tester, const Key('clearAllButton'));
+      await tester.tap(find.byKey(const Key('clearAllButton')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('clearAllConfirm1')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('clearAllConfirm2')));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await tester.pump();
+      expect(server.itemsById, isEmpty);
+      expect(state.items, isEmpty);
+      expect(find.textContaining('已清空'), findsOneWidget);
     });
   });
 }

@@ -380,5 +380,38 @@ void main() {
       expect(server.received.last.uri.path, '/api/v1/auth/logout');
       expect(server.received.last.method, 'POST');
     });
+
+    test('changePassword 成功：请求体含当前/新密码且服务端密码更新', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      await client.changePassword(
+          currentPassword: 'dev-pw-123', newPassword: 'new-password-456');
+      expect(server.password, 'new-password-456');
+      final req = server.received.last;
+      expect(req.uri.path, '/api/v1/auth/password');
+      expect(req.headers.value('authorization'), 'Bearer cps_tok_1');
+    });
+
+    test('changePassword 当前密码错误抛出 401 invalid_credentials', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      try {
+        await client.changePassword(
+            currentPassword: 'wrong', newPassword: 'new-password-456');
+        fail('应抛出 ApiException');
+      } on ApiException catch (e) {
+        expect(e.status, 401);
+        expect(e.code, 'invalid_credentials');
+      }
+      expect(server.password, 'dev-pw-123'); // 未改动
+    });
+
+    test('clearAll 携带幂等键并解析 deleted', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      await client.createTextItem('待清空');
+      final result = await client.clearAll(idemKey: 'k-clear-1');
+      expect((result['deleted'] as num).toInt(), greaterThanOrEqualTo(1));
+      expect(server.itemsById, isEmpty);
+      expect(
+          server.received.last.headers.value('idempotency-key'), 'k-clear-1');
+    });
   });
 }
