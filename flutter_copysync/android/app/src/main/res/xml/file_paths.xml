@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 剪贴板图片（clipboard.write image）与分享缓存 -->
+    <cache-path name="clipboard" path="clipboard/" />
+    <cache-path name="share_inbox" path="share_inbox/" />
+    <!-- 更新 APK（应用专属外部目录） -->
+    <external-files-path name="updates" path="Download/" />
+    <!-- 旧机型（API<29）打开接收文件的回退：公共 Download/CopySync -->
+    <external-path name="receive" path="Download/CopySync/" />
+</paths>

@@ -47,3 +47,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // FileProvider：剪贴板图片写入、更新 APK 安装、旧机型接收文件授权。
+    implementation("androidx.core:core:1.13.1")
+}
