@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'android_bridge_models.dart';
 import 'bridge_models.dart';
 import 'bridge_result.dart';
+import 'update_checker.dart';
 
 /// Android 原生桥接实现：MethodChannel `xyz.copysync/bridge`
 /// （与 macOS 同通道名、不同方法集，原生侧错误经 PlatformException.code →
@@ -14,7 +15,7 @@ import 'bridge_result.dart';
 ///
 /// 注意：`picker.files/photos` 不在此桥内——文件/图片选择已由
 /// file_selector 插件覆盖（Android 走 SAF），属 delegated-to-plugin。
-class AndroidNativeBridge {
+class AndroidNativeBridge implements UpdateChecker {
   AndroidNativeBridge({MethodChannel? channel})
       : _channel = channel ?? const MethodChannel(_channelName) {
     _channel.setMethodCallHandler(_onNativeEvent);
@@ -190,12 +191,14 @@ class AndroidNativeBridge {
   // ---------------------------------------------------------------- update
 
   /// 检查更新清单（旧工程 checkForUpdate：versionCode 比较）。
+  @override
   Future<BridgeResult<UpdateInfo>> updateCheck(String manifestUrl) => _invoke(
       'update.check',
       {'url': manifestUrl},
       (raw) => UpdateInfo.fromMap(raw as Map<Object?, Object?>? ?? const {}));
 
   /// 下载 APK 并做 SHA-256 校验，成功返回落盘路径。
+  @override
   Future<BridgeResult<String>> updateDownload(
           {required String url, required String sha256}) =>
       _invoke('update.download', {'url': url, 'sha256': sha256},
@@ -203,6 +206,7 @@ class AndroidNativeBridge {
 
   /// 发起安装（FileProvider 授权 + ACTION_VIEW APK）；
   /// 未允许未知来源时原生侧打开对应设置页并返回 permission_denied。
+  @override
   Future<BridgeResult<void>> updateInstall(String apkPath) =>
       _invoke('update.install', {'path': apkPath});
 }

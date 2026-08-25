@@ -151,16 +151,23 @@ void main() {
     });
   });
 
-  testWidgets('Android 底栏四个 tab，非收件箱显示阶段 4 占位', (tester) async {
+  testWidgets('Android 底栏切换四个真实页面', (tester) async {
     await tester.runAsync(() async {
       await pumpApp(tester);
       await loginThroughUi(tester);
       expect(find.text('传输历史'), findsOneWidget);
       expect(find.text('临时网盘'), findsOneWidget);
       expect(find.text('设置'), findsOneWidget);
-      await tester.tap(find.text('设置'));
+      await tester.tap(find.byIcon(Icons.history));
       await tester.pump();
-      expect(find.text('阶段 4 实现'), findsOneWidget);
+      expect(find.text('暂无传输记录'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.cloud_outlined));
+      await tester.pump();
+      expect(find.text('网盘为空'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.settings));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const Key('logoutButton')), findsOneWidget);
     });
   });
 

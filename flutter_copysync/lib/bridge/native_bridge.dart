@@ -2,11 +2,12 @@ import 'dart:typed_data';
 
 import 'bridge_models.dart';
 import 'bridge_result.dart';
+import 'update_checker.dart';
 
 /// 原生桥接统一接口（接口锁定见实施计划 Task 21）。
 /// 每个方法返回 [BridgeResult]，禁止静默失败。
 /// 页面接线在 Task 24 完成，本接口只定义能力面。
-abstract class NativeBridge {
+abstract class NativeBridge implements UpdateChecker {
   /// 原生 → Dart 事件流：
   /// `clipboard.changed`、`history.changed`、`hotkey.pressed`、`menubar.action`。
   Stream<BridgeEvent> get events;
@@ -76,9 +77,6 @@ abstract class NativeBridge {
   Future<BridgeResult<CacheUsage>> cacheUsage();
   Future<BridgeResult<void>> cacheClear();
 
-  // update.*（download 内含 SHA-256 校验，install 为覆盖安装+重启）
-  Future<BridgeResult<UpdateInfo>> updateCheck(String manifestUrl);
-  Future<BridgeResult<String>> updateDownload(
-      {required String url, required String sha256});
-  Future<BridgeResult<void>> updateInstall(String zipPath);
+  // update.* 由 UpdateChecker 接口继承（download 内含 SHA-256 校验，
+  // install 为覆盖安装+重启）。
 }

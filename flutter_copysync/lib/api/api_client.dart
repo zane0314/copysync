@@ -342,6 +342,9 @@ class ApiClient {
       throw ApiException(0, 'network_error', '无法连接服务器：${e.message}');
     } on HttpException catch (e) {
       throw ApiException(0, 'network_error', '网络错误：${e.message}');
+    } on OSError catch (e) {
+      // connect 阶段的对端重置等底层错误（不经 SocketException 包装）。
+      throw ApiException(0, 'network_error', '网络错误：${e.message}');
     } finally {
       client.close();
     }
@@ -366,6 +369,9 @@ class ApiClient {
       throw ApiException(0, 'network_error', '无法连接服务器：${e.message}');
     } on HttpException catch (e) {
       throw ApiException(0, 'network_error', '网络错误：${e.message}');
+    } on OSError catch (e) {
+      // connect 阶段的对端重置等底层错误（不经 SocketException 包装）。
+      throw ApiException(0, 'network_error', '网络错误：${e.message}');
     } finally {
       client.close();
     }
@@ -386,9 +392,9 @@ class ApiClient {
       'PATCH',
       '/api/v1/items/$id',
       jsonBody: {
-        if (pinned != null) 'pinned': pinned,
-        if (note != null) 'note': note,
-        if (ttl != null) 'ttl': ttl,
+        'pinned': ?pinned,
+        'note': ?note,
+        'ttl': ?ttl,
       },
       headers: {
         if (idemKey != null && idemKey.isNotEmpty) 'Idempotency-Key': idemKey,
@@ -518,6 +524,9 @@ class ApiClient {
     } on SocketException catch (e) {
       throw ApiException(0, 'network_error', '无法连接服务器：${e.message}');
     } on HttpException catch (e) {
+      throw ApiException(0, 'network_error', '网络错误：${e.message}');
+    } on OSError catch (e) {
+      // connect 阶段的对端重置等底层错误（不经 SocketException 包装）。
       throw ApiException(0, 'network_error', '网络错误：${e.message}');
     } finally {
       client.close();

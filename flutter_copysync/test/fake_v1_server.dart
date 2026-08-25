@@ -55,8 +55,20 @@ class FakeV1Server {
 
   Future<String> start() async {
     _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    _server!.listen(_handle);
+    _server!.listen(_handleSafely);
     return 'http://127.0.0.1:${_server!.port}';
+  }
+
+  String get baseUrl => 'http://127.0.0.1:${_server!.port}';
+
+  /// 测试结束 tearDown 强制关服务器时，进行中的请求会连接断开；
+  /// 吞掉这类噪音避免未捕获异步错误使测试失败。
+  Future<void> _handleSafely(HttpRequest req) async {
+    try {
+      await _handle(req);
+    } on Object {
+      // 连接被对端重置/关闭：仅测试收尾时出现，忽略。
+    }
   }
 
   Future<void> stop() => _server!.close(force: true);
