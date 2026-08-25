@@ -432,6 +432,12 @@ class _InboxPageState extends State<InboxPage> {
         onTap: () => showItemDetail(context, item),
         child: const Text('查看详情'),
       ),
+      if (state.android != null && item.kind != 'text')
+        PopupMenuItem(
+          key: Key('openReceived-${item.id}'),
+          onTap: () => state.openReceivedItem(item),
+          child: const Text('打开已接收文件'),
+        ),
       PopupMenuItem(
         onTap: () async {
           if (await confirmDelete(context, item.text.isNotEmpty ? item.text : item.name)) {
@@ -444,16 +450,29 @@ class _InboxPageState extends State<InboxPage> {
   }
 
   Future<void> _copyText(Item item) async {
-    // 优先桥写剪贴板（ignoreNext 语义），桥不可用降级 Flutter 内置剪贴板。
+    // 优先桥写剪贴板（macOS ignoreNext 语义 / Android 原生写），
+    // 桥不可用降级 Flutter 内置剪贴板。
     final bridge = widget.bridge;
     if (bridge != null) {
       final result = await bridge.clipboardWrite(text: item.text);
+      if (result.ok) return;
+    }
+    final android = state.android;
+    if (android != null) {
+      final result = await android.clipboardWrite(text: item.text);
       if (result.ok) return;
     }
     await Clipboard.setData(ClipboardData(text: item.text));
   }
 
   Future<void> _download(Item item) async {
+    // Android：经 DownloadManager 入队到 Download/CopySync 并 ack
+    //（旧工程下载语义；完成通知由原生下载接收器负责）。
+    if (state.android != null) {
+      final ok = await state.receiveItemFile(item);
+      if (!ok) debugPrint('下载失败：无对应投递或入队失败');
+      return;
+    }
     try {
       final bytes = await state.api.downloadContent(item.id);
       final bridge = widget.bridge;

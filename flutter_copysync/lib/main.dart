@@ -9,6 +9,7 @@ import 'bridge/native_bridge.dart';
 import 'bridge/update_checker.dart';
 import 'state/app_state.dart';
 import 'state/history_controller.dart';
+import 'state/menu_coordinator.dart';
 import 'state/token_store.dart';
 import 'ui/home_shell.dart';
 import 'ui/login_page.dart';
@@ -24,17 +25,21 @@ void main() {
     tokenStore: SecureTokenStore(),
   );
 
-  // 平台桥：macOS 全量桥 + 历史浮窗；Android 桥提供更新检查等能力。
+  // 平台桥：macOS 全量桥 + 历史浮窗 + 菜单栏动作协调；Android 桥提供更新检查等能力。
   NativeBridge? bridge;
   UpdateChecker? updater;
   HistoryController? history;
+  MenuCoordinator? menu;
   if (Platform.isMacOS) {
     final macBridge = MacosNativeBridge();
     bridge = macBridge;
     updater = macBridge;
     history = HistoryController(bridge: macBridge)..start();
+    menu = MenuCoordinator(bridge: macBridge, history: history)..start();
   } else if (Platform.isAndroid) {
-    updater = AndroidNativeBridge();
+    final androidBridge = AndroidNativeBridge();
+    updater = androidBridge;
+    state.android = androidBridge;
   }
 
   state.restoreSession();
@@ -43,6 +48,7 @@ void main() {
     bridge: bridge,
     updater: updater,
     history: history,
+    menu: menu,
   ));
 }
 
@@ -53,6 +59,7 @@ class CopySyncApp extends StatelessWidget {
     this.bridge,
     this.updater,
     this.history,
+    this.menu,
     this.desktopLayout,
   });
 
@@ -60,6 +67,7 @@ class CopySyncApp extends StatelessWidget {
   final NativeBridge? bridge;
   final UpdateChecker? updater;
   final HistoryController? history;
+  final MenuCoordinator? menu;
 
   /// 强制桌面/移动布局（测试用）；null 时按平台判断。
   final bool? desktopLayout;
@@ -78,6 +86,7 @@ class CopySyncApp extends StatelessWidget {
                 bridge: bridge,
                 updater: updater,
                 history: history,
+                menu: menu,
                 desktopLayout: desktopLayout,
               )
             : LoginPage(state: state),

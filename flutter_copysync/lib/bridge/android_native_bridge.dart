@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 
 import 'android_bridge_models.dart';
+import 'android_host.dart';
 import 'bridge_models.dart';
 import 'bridge_result.dart';
 import 'update_checker.dart';
@@ -15,7 +16,7 @@ import 'update_checker.dart';
 ///
 /// 注意：`picker.files/photos` 不在此桥内——文件/图片选择已由
 /// file_selector 插件覆盖（Android 走 SAF），属 delegated-to-plugin。
-class AndroidNativeBridge implements UpdateChecker {
+class AndroidNativeBridge implements UpdateChecker, AndroidHost {
   AndroidNativeBridge({MethodChannel? channel})
       : _channel = channel ?? const MethodChannel(_channelName) {
     _channel.setMethodCallHandler(_onNativeEvent);
@@ -28,6 +29,7 @@ class AndroidNativeBridge implements UpdateChecker {
       StreamController<BridgeEvent>.broadcast();
 
   /// 原生 → Dart 事件流：目前为 `share.pending`（新分享到达）。
+  @override
   Stream<BridgeEvent> get events => _events.stream;
 
   /// 原生侧反向调用统一视为事件（不做请求/应答）。
@@ -69,6 +71,7 @@ class AndroidNativeBridge implements UpdateChecker {
 
   /// 写入剪贴板（text 与 png 二选一）；[ignoreNext] 仅透传，
   /// Android 侧无原生 watcher，去重由 Dart 同步循环负责。
+  @override
   Future<BridgeResult<void>> clipboardWrite(
       {String? text, Uint8List? png, bool ignoreNext = false}) {
     Map<String, Object?>? args;
@@ -93,13 +96,16 @@ class AndroidNativeBridge implements UpdateChecker {
 
   /// 启动前台服务（对应旧工程 SyncService；SSE/同步循环在 Dart 侧，
   /// 原生只管服务生命周期与常驻通知）。mode 为 realtime/saving。
+  @override
   Future<BridgeResult<void>> backgroundStart({String mode = 'realtime'}) =>
       _invoke('background.start', {'mode': mode});
 
+  @override
   Future<BridgeResult<void>> backgroundStop() => _invoke('background.stop');
 
   // ---------------------------------------------------------------- notify
 
+  @override
   Future<BridgeResult<void>> notifyShow(
           {required String title, required String body, String? id}) =>
       _invoke('notify.show', {'title': title, 'body': body, 'id': ?id});
@@ -108,6 +114,7 @@ class AndroidNativeBridge implements UpdateChecker {
 
   /// 拉取所有待确认分享（ACTION_SEND / SEND_MULTIPLE 由原生侧缓存，
   /// 文件已复制到应用缓存目录）。
+  @override
   Future<BridgeResult<List<AndroidSharePayload>>> sharePending() =>
       _invoke('share.pending', null, (raw) =>
           (raw as List<Object?>? ?? const [])
@@ -116,6 +123,7 @@ class AndroidNativeBridge implements UpdateChecker {
               .toList());
 
   /// 确认（发送完成或放弃）后调用，原生侧删除缓存文件与记录。
+  @override
   Future<BridgeResult<void>> shareConfirm(List<String> ids) =>
       _invoke('share.confirm', {'ids': ids});
 
@@ -123,6 +131,7 @@ class AndroidNativeBridge implements UpdateChecker {
 
   /// 经 DownloadManager 入队下载到 Download/CopySync（旧工程语义），
   /// 返回系统下载 id；headers 用于携带 Cookie 等认证信息。
+  @override
   Future<BridgeResult<int>> downloadEnqueue({
     required String url,
     required String deliveryId,
@@ -143,6 +152,7 @@ class AndroidNativeBridge implements UpdateChecker {
 
   /// 对账所有未完成下载（重启恢复语义）：返回每条 delivery 的
   /// ready/pending/failed/missing 状态。
+  @override
   Future<BridgeResult<List<AndroidDownloadRecord>>> downloadReconcile() =>
       _invoke('download.reconcile', null, (raw) =>
           (raw as List<Object?>? ?? const [])
@@ -153,6 +163,7 @@ class AndroidNativeBridge implements UpdateChecker {
   // ----------------------------------------------------------------- files
 
   /// 已发送文件落盘 Download/CopySync，返回最终文件名。
+  @override
   Future<BridgeResult<String>> filesSaveSent(
           {required String itemId,
           required String name,
@@ -183,6 +194,7 @@ class AndroidNativeBridge implements UpdateChecker {
           (raw) => raw as String? ?? '');
 
   /// 调用系统查看器打开接收文件（旧工程 viewReceivedFile 语义）。
+  @override
   Future<BridgeResult<void>> filesOpenReceived(
           {String? deliveryId, required String name, required String mime}) =>
       _invoke('files.openReceived',
