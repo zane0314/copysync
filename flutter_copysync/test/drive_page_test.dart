@@ -142,4 +142,69 @@ void main() {
       await tester.pump();
     });
   });
+
+  testWidgets('搜索按文本与文件名过滤网盘列表', (tester) async {
+    await tester.runAsync(() async {
+      state = await loggedInState(server);
+      await state.sendText('alpha 文本笔记');
+      final path = '${Directory.systemTemp.path}/drive_filter.bin';
+      await File(path).writeAsBytes(List.filled(32, 65));
+      await state.sendFile(path);
+      await pumpShell(tester, state);
+      await openDrive(tester);
+      expect(find.text('alpha 文本笔记'), findsOneWidget);
+      expect(find.text('drive_filter.bin'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('driveSearchField')), '报告');
+      await tester.pump();
+      expect(find.text('alpha 文本笔记'), findsNothing);
+      expect(find.text('drive_filter.bin'), findsNothing);
+      await tester.enterText(
+          find.byKey(const Key('driveSearchField')), 'drive_filter');
+      await tester.pump();
+      expect(find.text('drive_filter.bin'), findsOneWidget);
+      expect(find.text('alpha 文本笔记'), findsNothing);
+      await tester.enterText(find.byKey(const Key('driveSearchField')), '');
+      await tester.pump();
+      expect(find.text('alpha 文本笔记'), findsOneWidget);
+      await File(path).delete();
+    });
+  });
+
+  testWidgets('类型筛选 chip 过滤，已固定筛选只看图钉项', (tester) async {
+    await tester.runAsync(() async {
+      state = await loggedInState(server);
+      await state.sendText('筛选文本');
+      // 1x1 透明 PNG（非法图片字节会触发预览解码异常）
+      final pngBytes = [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
+        0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x60, 0x00, 0x02, 0x00,
+        0x00, 0x05, 0x00, 0x01, 0x7A, 0x5E, 0xAB, 0x3F, 0x00, 0x00, 0x00, 0x00,
+        0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+      ];
+      final path = '${Directory.systemTemp.path}/filter_pic.png';
+      await File(path).writeAsBytes(pngBytes);
+      await state.sendImage(path);
+      await pumpShell(tester, state);
+      await openDrive(tester);
+      // 图钉置顶文本项
+      final textItem = state.items.firstWhere((i) => i.text == '筛选文本');
+      await state.setPinned(textItem.id, true);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('driveFilter-image')));
+      await tester.pump();
+      expect(find.text('筛选文本'), findsNothing);
+      expect(find.text('filter_pic.png'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('driveFilter-pinned')));
+      await tester.pump();
+      expect(find.text('筛选文本'), findsOneWidget);
+      expect(find.text('filter_pic.png'), findsNothing);
+      await tester.tap(find.byKey(const Key('driveFilter-all')));
+      await tester.pump();
+      expect(find.text('筛选文本'), findsOneWidget);
+      expect(find.text('filter_pic.png'), findsOneWidget);
+      await File(path).delete();
+    });
+  });
 }

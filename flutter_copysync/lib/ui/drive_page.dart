@@ -25,6 +25,13 @@ class DrivePage extends StatefulWidget {
 class _DrivePageState extends State<DrivePage> {
   AppState get state => widget.state;
 
+  /// 搜索关键词与类型筛选（'' = 全部；pinned = 已固定）。
+  String _query = '';
+  String _kindFilter = '';
+
+  static const _kindFilters = ['', 'text', 'file', 'image', 'pinned'];
+  static const _kindLabels = ['全部', '文本', '文件', '图片', '已固定'];
+
   @override
   void initState() {
     super.initState();
@@ -45,7 +52,7 @@ class _DrivePageState extends State<DrivePage> {
       child: ListenableBuilder(
         listenable: state,
         builder: (context, _) {
-          final items = state.driveItems.reversed.toList();
+          final items = _filtered(state.driveItems.reversed.toList());
           final uploading = state.sendStatus == OpStatus.loading;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -96,6 +103,39 @@ class _DrivePageState extends State<DrivePage> {
                         color: AppColors.textSecondary, fontSize: 12),
                   ),
                 ),
+              // 搜索 + 类型筛选（与网页端同语义：本地列表过滤）。
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.xl, AppSpacing.xs, AppSpacing.xl, 0),
+                child: TextField(
+                  key: const Key('driveSearchField'),
+                  decoration: const InputDecoration(
+                    hintText: '搜索文本、文件和图片',
+                    prefixIcon: Icon(Icons.search, size: 20),
+                    isDense: true,
+                  ),
+                  onChanged: (value) => setState(() => _query = value),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.xl, AppSpacing.sm, AppSpacing.xl, 0),
+                child: Wrap(
+                  spacing: AppSpacing.sm,
+                  children: [
+                    for (var i = 0; i < _kindFilters.length; i++)
+                      ChoiceChip(
+                        key: Key(
+                            'driveFilter-${_kindFilters[i].isEmpty ? 'all' : _kindFilters[i]}'),
+                        label: Text(_kindLabels[i]),
+                        selected: _kindFilter == _kindFilters[i],
+                        onSelected: (_) =>
+                            setState(() => _kindFilter = _kindFilters[i]),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
               Expanded(
                 child: RefreshIndicator(
                   key: const Key('drivePullRefresh'),
@@ -132,6 +172,25 @@ class _DrivePageState extends State<DrivePage> {
         },
       ),
     );
+  }
+
+  /// 应用搜索关键词与类型筛选（pinned 筛选项按图钉过滤）。
+  List<Item> _filtered(List<Item> items) {
+    var result = items;
+    if (_kindFilter == 'pinned') {
+      result = result.where((i) => i.pinned).toList();
+    } else if (_kindFilter.isNotEmpty) {
+      result = result.where((i) => i.kind == _kindFilter).toList();
+    }
+    final q = _query.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      result = result
+          .where((i) =>
+              i.text.toLowerCase().contains(q) ||
+              i.name.toLowerCase().contains(q))
+          .toList();
+    }
+    return result;
   }
 
   Widget _tileFor(BuildContext context, Item item) {
