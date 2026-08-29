@@ -12,3 +12,6 @@ PRODUCT_BUNDLE_IDENTIFIER = xyz.copysync.copysync
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 xyz.copysync. All rights reserved.
+
+// Override this build setting for a deployment-specific update manifest.
+COPYSYNC_UPDATE_MANIFEST_URL = https://copy.example.com/api/update/mac

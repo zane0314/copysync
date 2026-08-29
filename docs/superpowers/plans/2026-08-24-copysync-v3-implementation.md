@@ -74,7 +74,7 @@
 
 - [ ] **Step 2: 核对并提交**
 
-Run: `cd "/path/to/copysync" && python3 -c "print(open('docs/superpowers/specs/2026-08-24-copysync-v3-baseline-matrix.md').read().count('|'))"` 人工抽查 10 行锚点与源码一致。
+Run: `cd /path/to/copysync && python3 -c "print(open('docs/superpowers/specs/2026-08-24-copysync-v3-baseline-matrix.md').read().count('|'))"` 人工抽查 10 行锚点与源码一致。
 Run: `git add docs/superpowers/specs/2026-08-24-copysync-v3-baseline-matrix.md && git commit -m "docs: freeze v3 baseline feature matrix"`
 
 ### Task 2: 服务端自动基线
@@ -84,7 +84,7 @@ Run: `git add docs/superpowers/specs/2026-08-24-copysync-v3-baseline-matrix.md &
 
 - [ ] **Step 1: 跑现有测试并记录**
 
-Run: `cd "/path/to/copysync" && python3 -m unittest test_app.py -v 2>&1 | tail -5`
+Run: `cd /path/to/copysync && python3 -m unittest test_app.py -v 2>&1 | tail -5`
 Expected: `Ran 22 tests` / `OK`。把命令、结果、Python 版本（`python3 -V`）写入基线文档。
 
 - [ ] **Step 2: 提交**
@@ -99,7 +99,7 @@ Run: `git add -A docs && git commit -m "docs: record server baseline test result
 
 - [ ] **Step 1: 起本地服务**
 
-Run: `cd "/path/to/copysync" && WEBCLIP_DATA_DIR=/tmp/copysync-baseline python3 app.py &`，确认 `curl -s http://127.0.0.1:15080/healthz` 返回 `ok`。用完后 `kill %1`。
+Run: `cd /path/to/copysync && WEBCLIP_DATA_DIR=/tmp/copysync-baseline python3 app.py &`，确认 `curl -s http://127.0.0.1:15080/healthz` 返回 `ok`。用完后 `kill %1`。
 
 - [ ] **Step 2: 用 kimi-webbridge 逐项操作并截图**
 
@@ -117,12 +117,12 @@ Run: `git add docs && git commit -m "docs: freeze web baseline gui evidence"`
 
 - [ ] **Step 1: 验证现有构建可用**
 
-Run: `cd "/path/to/copysync" && zsh mac-clipboard/test-recovery.sh && ls -la mac-clipboard/build-2.0/CopySync.app`
+Run: `cd /path/to/copysync && zsh mac-clipboard/test-recovery.sh && ls -la mac-clipboard/build-2.0/CopySync.app`
 Expected: 冒烟脚本通过、.app 存在且已签名（`codesign -dv mac-clipboard/build-2.0/CopySync.app 2>&1 | head -5`）。
 
 - [ ] **Step 2: 安装并逐项操作**
 
-`open mac-clipboard/build-2.0/CopySync.app`（连接本地基线实例需在系统层临时改基址或直接对线上只读操作——选择对线上 `https://copy-direct.example.com` 做只读项 + 对本地实例做写项，写入 HANDOFF）。用 osascript/System Events + `screencapture` 逐项：窗口与侧栏、菜单栏每一项、⌘. / ⌘, / ⌘J 快捷键、文本/图片历史与去重、区域截图、悬浮固定、复制并粘贴到前一应用、忽略下一次复制、权限入口、接收与 Finder 定位、清理、检查更新。截图存 `assets/baseline/mac/` 并回填矩阵。
+`open mac-clipboard/build-2.0/CopySync.app`（连接本地基线实例需在系统层临时改基址或对配置的服务 URL 做只读项 + 对本地实例做写项，写入 HANDOFF）。用 osascript/System Events + `screencapture` 逐项：窗口与侧栏、菜单栏每一项、⌘. / ⌘, / ⌘J 快捷键、文本/图片历史与去重、区域截图、悬浮固定、复制并粘贴到前一应用、忽略下一次复制、权限入口、接收与 Finder 定位、清理、检查更新。截图存 `assets/baseline/mac/` 并回填矩阵。
 
 - [ ] **Step 3: 提交**
 
@@ -138,7 +138,7 @@ Run: `git add docs && git commit -m "docs: freeze mac baseline gui evidence"`
 
 - [ ] **Step 1: 尝试取得可安装基线 APK**
 
-顺序尝试：(a) `curl -s https://copy-direct.example.com/updates/CopyWeb-Android-latest.apk -o /tmp/CopyWeb-baseline.apk` 并用 `shasum -a256` 对 `updates/android.json` 的 sha256 校验；(b) 在本机 `mdfind -name "CopyWeb*.apk"`、常见构建输出目录找历史 APK；(c) 找完整 Android 工程副本。任一路径成功即记录来源与校验值。
+顺序尝试：(a) 从配置的更新服务下载 `CopyWeb-Android-latest.apk` 并用 `shasum -a256` 对 `updates/android.json` 的 sha256 校验；(b) 在本机 `mdfind -name "CopyWeb*.apk"`、常见构建输出目录找历史 APK；(c) 找完整 Android 工程副本。任一路径成功即记录来源与校验值。
 
 - [ ] **Step 2: Emulator 安装并逐项操作**
 
@@ -156,7 +156,7 @@ Run: `git add docs && git commit -m "docs: freeze android baseline gui evidence"
 
 ## 阶段 2：API 与数据
 
-所有新代码在 `app.py` 内，沿用现有模式。新测试进 `test_app.py`（unittest，沿用其临时目录隔离写法）。每个 Task 的 Step 顺序固定为：写失败测试 → 跑确认失败 → 最小实现 → 跑确认通过 → 提交。下方给出关键测试与实现代码；跑测试统一用 `cd "/path/to/copysync" && python3 -m unittest test_app.py -v`。
+所有新代码在 `app.py` 内，沿用现有模式。新测试进 `test_app.py`（unittest，沿用其临时目录隔离写法）。每个 Task 的 Step 顺序固定为：写失败测试 → 跑确认失败 → 最小实现 → 跑确认通过 → 提交。下方给出关键测试与实现代码；跑测试统一用 `cd /path/to/copysync && python3 -m unittest test_app.py -v`。
 
 ### Task 6: v1 错误格式与 v1 测试基座
 
@@ -450,7 +450,7 @@ def test_variant_sha_mismatch_rejected(self): ...    # 400 code='sha256_mismatch
 
 **Files:** Modify `.ai/HANDOFF.md`；Create `docs/superpowers/specs/2026-08-24-copysync-v3-migration-rehearsal.md`
 
-- [ ] **Step 1:** 备份线上数据：`ssh <VPS> "systemctl stop copy-example && cp -a /opt/copy-example/data /opt/copy-example/data.bak-v3-$(date +%Y%m%d) && sha256sum data/clipboard.db"`，校验值与恢复命令写入演练文档（VPS 凭证从 `$HOME/Documents/yaml 文件/vps` 读取，不写入任何文档）。
+- [ ] **Step 1:** 备份线上数据：`ssh <VPS> "systemctl stop copy-example && cp -a /opt/copy-example/data /opt/copy-example/data.bak-v3-$(date +%Y%m%d) && sha256sum data/clipboard.db"`，校验值与恢复命令写入演练文档（VPS 凭证从本地安全存储读取，不写入任何文档）。
 - [ ] **Step 2:** 把生产 `clipboard.db` + `files/` 副本拉到本地临时目录，用新代码 `init()` 迁移：验证四张新表、item_blobs 回填数量=有文件 item 数、items 主键与字段不变、`python3 -m unittest` 对迁移后库通过。
 - [ ] **Step 3:** 二次执行迁移确认幂等；用备份恢复确认回滚路径可用（本地副本上演练，不动线上）。
 - [ ] **Step 4:** 记录全部命令与结果，提交演练文档：`git commit -m "docs: v1 migration rehearsal on production copy"`。

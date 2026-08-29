@@ -66,8 +66,8 @@ import org.json.JSONObject;
 public final class MainActivity extends Activity {
     private static final int PICK_FILES = 1;
     private static final int ALLOW_UPDATES = 2;
-    private static final String UPDATE_MANIFEST = "https://copy-direct.example.com/api/update/android";
-    private static final String BASE = "https://copy-direct.example.com/";
+    private static final String BASE = BuildConfig.COPYSYNC_BASE_URL;
+    private static final String UPDATE_MANIFEST = BASE + "api/update/android";
     private static final String SITE = BASE + "?app=android";
     private static final String NOTIFICATION_CHANNEL = "copysync_delivery";
     private static final String PREFS = "copysync";
@@ -306,7 +306,7 @@ public final class MainActivity extends Activity {
         body.setOrientation(LinearLayout.VERTICAL);
         body.setPadding(dp(8), dp(6), dp(8), 0);
         TextView copy = new TextView(this);
-        copy.setText("当前设备：Android 手机\n网页入口：copy-direct.example.com\n\n后台同步模式");
+        copy.setText("当前设备：Android 手机\n网页入口：" + Uri.parse(BASE).getHost() + "\n\n后台同步模式");
         copy.setTextSize(16);
         copy.setLineSpacing(dp(5), 1);
         body.addView(copy);

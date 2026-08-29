@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../bridge/bridge_models.dart';
 import '../bridge/bridge_result.dart';
 import '../bridge/native_bridge.dart';
+import '../config.dart';
 import 'history_controller.dart';
 
 /// macOS 菜单栏动作与主窗口/截图快捷键的 Dart 侧接线。
@@ -18,7 +19,7 @@ class MenuCoordinator extends ChangeNotifier {
   final HistoryController? history;
 
   /// 与设置页共用的 macOS 更新清单地址。
-  static const macUpdateManifest = 'https://copy-direct.example.com/api/update/mac';
+  static const macUpdateManifest = '$updateBaseUrl/api/update/mac';
 
   /// 切换主窗口到指定 tab（0 收件箱 / 1 传输历史 / 2 临时网盘 / 3 设置），
   /// 由 HomeShell 注入。

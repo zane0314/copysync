@@ -51,7 +51,7 @@ WEB_STATIC_TYPES = {
 }
 HOST = os.environ.get("WEBCLIP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WEBCLIP_PORT", "15080"))
-USERNAME = os.environ.get("WEBCLIP_USERNAME", "zane")
+USERNAME = os.environ.get("WEBCLIP_USERNAME", "admin")
 PASSWORD = os.environ.get("WEBCLIP_PASSWORD", "")
 SESSION_SECRET = os.environ.get("WEBCLIP_SESSION_SECRET", "")
 PASSWORD_HASH = os.environ.get("WEBCLIP_PASSWORD_HASH", "")

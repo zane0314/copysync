@@ -1,7 +1,7 @@
 {
   "version": "2.0.3",
   "versionCode": 29,
-  "url": "https://copy-direct.example.com/updates/CopyWeb-Android-latest.apk",
+  "url": "https://copy.example.com/updates/CopyWeb-Android-latest.apk",
   "sha256": "c6f1b407c96334c893b5a061dfb575a09a040b1bbc6b4d0a985bd8c451addff1",
-  "notes": "修复旧版升级后保留 token 但缺少服务器地址时误连 Emulator 专用地址，导致临时网盘、传输历史和上传全部连接重置；生产默认 API 地址改为 https://copy-direct.example.com，开发环境可用 COPYSYNC_BASE_URL 覆盖；保留大文件全链路流式处理与 100MB 客户端守卫。"
+  "notes": "修复旧版升级后保留 token 但缺少服务器地址时误连 Emulator 专用地址，导致临时网盘、传输历史和上传全部连接重置；生产构建请通过 COPYSYNC_BASE_URL 注入实际 API 地址，开发环境也可用该参数覆盖；保留大文件全链路流式处理与 100MB 客户端守卫。"
 }

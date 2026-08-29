@@ -23,7 +23,14 @@ private let historyPinnedKey = "historyPinned"
 private let historyShortcutKey = "historyShortcut"
 private let receivedDeliveryPathsKey = "receivedDeliveryPaths"
 private let historyLimit = 10
-private let updateManifestURL = "https://copy-direct.example.com/api/update/mac"
+private let updateManifestURL: String = {
+    guard let configured = Bundle.main.object(forInfoDictionaryKey: "CopySyncUpdateManifestURL") as? String,
+          !configured.isEmpty,
+          !configured.hasPrefix("$(") else {
+        return "https://copy.example.com/api/update/mac"
+    }
+    return configured
+}()
 
 private func bridgeError(_ code: String, _ message: String) -> FlutterError {
   return FlutterError(code: code, message: message, details: nil)

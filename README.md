@@ -5,7 +5,7 @@
 ## 本地运行
 
 ```sh
-cd copy-example
+cd copysync
 export WEBCLIP_PASSWORD='change-me'
 export WEBCLIP_SESSION_SECRET='change-me-too'
 export WEBCLIP_COOKIE_SECURE=0
@@ -17,6 +17,8 @@ python3 app.py
 程序会自动读取当前目录的 `.env`；同名环境变量已存在时，以外部环境变量为准。
 
 正式入口应放在 HTTPS 后面，并保持 `WEBCLIP_COOKIE_SECURE=1`。
+
+公开源码默认使用 `example.com` 占位地址。部署时把真实地址只放在未提交的 `.env` 或构建参数中：Flutter 使用 `--dart-define=COPYSYNC_BASE_URL=https://your-domain.example`（更新清单可用 `COPYSYNC_UPDATE_BASE_URL` 单独覆盖）；旧 Android 工程使用 `-PCOPYSYNC_BASE_URL=https://your-domain.example`；原生 macOS 构建使用 `COPYSYNC_BASE_URL`、`COPYSYNC_BUNDLE_ID` 和 `COPYSYNC_PASTEBOARD_TYPE` 环境变量。不要把生产域名、账号或密钥提交到仓库。
 
 首次启动时 `WEBCLIP_PASSWORD` 会被写入 SQLite 为 PBKDF2-SHA256 哈希。后续可在网页里修改密码；修改后其他已登录设备会自动失效。
 

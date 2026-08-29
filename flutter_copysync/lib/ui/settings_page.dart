@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../bridge/native_bridge.dart';
 import '../bridge/update_checker.dart';
+import '../config.dart';
 import '../state/app_state.dart';
 import 'tokens.dart';
 import 'widgets/item_tile.dart';
@@ -34,9 +35,8 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _updateSha256;
   bool _installing = false;
 
-  static const _macManifest = 'https://copy-direct.example.com/api/update/mac';
-  static const _androidManifest =
-      'https://copy-direct.example.com/updates/android.json';
+  static const _macManifest = '$updateBaseUrl/api/update/mac';
+  static const _androidManifest = '$updateBaseUrl/updates/android.json';
 
   AppState get state => widget.state;
 

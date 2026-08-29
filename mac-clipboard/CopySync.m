@@ -6,8 +6,16 @@
 #import <UserNotifications/UserNotifications.h>
 #import <WebKit/WebKit.h>
 
-static NSString *const Site = @"https://copy-direct.example.com/?app=mac";
-static NSString *const UpdateManifest = @"https://copy-direct.example.com/api/update/mac";
+#ifndef COPYSYNC_BASE_URL
+#define COPYSYNC_BASE_URL "https://copy.example.com"
+#endif
+#ifndef COPYSYNC_PASTEBOARD_TYPE
+#define COPYSYNC_PASTEBOARD_TYPE "com.example.copysync"
+#endif
+
+static NSString *const CopySyncBaseURL = @COPYSYNC_BASE_URL;
+static NSString *const Site = @COPYSYNC_BASE_URL @"/?app=mac";
+static NSString *const UpdateManifest = @COPYSYNC_BASE_URL @"/api/update/mac";
 static NSInteger const WebKitPolicyChangeError = 102;
 static NSString *const PendingUploadsKey = @"CopySync.pendingUploads";
 static NSString *const IgnoreNextCopyKey = @"ignoreNextCopy";
@@ -19,7 +27,7 @@ static NSString *const HistoryShortcutKey = @"historyShortcut";
 static NSString *const HistoryPinnedKey = @"historyPinned";
 static NSString *const HistoryVisibleKey = @"historyVisible";
 static NSString *const ReceivedDeliveryPathsKey = @"receivedDeliveryPaths";
-static NSPasteboardType const CopySyncPasteboardType = @"com.example.copysync";
+static NSPasteboardType const CopySyncPasteboardType = @COPYSYNC_PASTEBOARD_TYPE;
 static const int64_t PasteSignature = 0x434F5059;
 
 @class CopySyncApp;
@@ -296,7 +304,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
 - (void)showMacRecords:(id)sender { [self selectMacSection:@"records"]; }
 - (void)showMacDrive:(id)sender { [self selectMacSection:@"drive"]; }
 - (void)openWebVersion:(id)sender {
-    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"https://copy-direct.example.com/"]];
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:CopySyncBaseURL]];
 }
 
 - (NSURL *)cacheRootURL {
@@ -1222,7 +1230,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
 }
 
 - (void)ackDelivery:(NSString *)deliveryID status:(NSString *)status cookieHeader:(NSString *)cookieHeader {
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://copy-direct.example.com/api/deliveries/%@/ack", deliveryID]]];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"%@/api/deliveries/%@/ack", CopySyncBaseURL, deliveryID]]];
     request.HTTPMethod = @"POST";
     request.HTTPBody = [[NSString stringWithFormat:@"status=%@", status] dataUsingEncoding:NSUTF8StringEncoding];
     [request setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
@@ -1237,7 +1245,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
     [self.incomingDeliveryIDs addObject:deliveryID];
     [self.webView.configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies) {
         NSString *cookieHeader = [NSHTTPCookie requestHeaderFieldsWithCookies:cookies][@"Cookie"] ?: @"";
-        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://copy-direct.example.com/download/%@", itemID]]];
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"%@/download/%@", CopySyncBaseURL, itemID]]];
         if (cookieHeader.length) [request setValue:cookieHeader forHTTPHeaderField:@"Cookie"];
         [[[NSURLSession sharedSession] downloadTaskWithRequest:request completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
             NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
@@ -1286,7 +1294,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
     [self.incomingDeliveryIDs addObject:storageKey];
     [self.webView.configuration.websiteDataStore.httpCookieStore getAllCookies:^(NSArray<NSHTTPCookie *> *cookies) {
         NSString *cookieHeader = [NSHTTPCookie requestHeaderFieldsWithCookies:cookies][@"Cookie"] ?: @"";
-        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"https://copy-direct.example.com/download/%@", itemID]]];
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"%@/download/%@", CopySyncBaseURL, itemID]]];
         if (cookieHeader.length) [request setValue:cookieHeader forHTTPHeaderField:@"Cookie"];
         [[[NSURLSession sharedSession] downloadTaskWithRequest:request completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
             NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
@@ -1321,7 +1329,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
 
 - (void)webView:(WKWebView *)webView runJavaScriptTextInputPanelWithPrompt:(NSString *)prompt defaultText:(NSString *)defaultText initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(NSString *result))completionHandler {
     if ([prompt isEqualToString:@"copysync-copy"]) {
-        NSString *downloadLink = [NSString stringWithFormat:@"https://copy-direct.example.com/download/%@", defaultText ?: @""];
+        NSString *downloadLink = [NSString stringWithFormat:@"%@/download/%@", CopySyncBaseURL, defaultText ?: @""];
         NSPasteboard *pasteboard = NSPasteboard.generalPasteboard;
         [pasteboard clearContents];
         BOOL copied = [pasteboard writeObjects:@[downloadLink]];
@@ -1337,7 +1345,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
     NSURL *url = navigationAction.request.URL;
     if ([url.scheme isEqualToString:@"copysync-copy"]) {
         NSString *itemID = url.lastPathComponent.stringByRemovingPercentEncoding ?: @"";
-        NSString *downloadLink = [NSString stringWithFormat:@"https://copy-direct.example.com/download/%@", itemID];
+        NSString *downloadLink = [NSString stringWithFormat:@"%@/download/%@", CopySyncBaseURL, itemID];
         NSPasteboard *pasteboard = NSPasteboard.generalPasteboard;
         [pasteboard clearContents];
         BOOL copied = [pasteboard writeObjects:@[downloadLink]];
@@ -1505,7 +1513,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
             [self.webView evaluateJavaScript:script completionHandler:nil];
         });
     } else if ([type isEqual:@"openWeb"]) {
-        [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"https://copy-direct.example.com/"]];
+        [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:CopySyncBaseURL]];
     }
 }
 

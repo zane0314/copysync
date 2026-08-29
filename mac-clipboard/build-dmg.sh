@@ -4,11 +4,19 @@ set -euo pipefail
 root=${0:A:h}
 build="$root/build-2.0"
 app="$build/CopySync.app"
+base_url=${COPYSYNC_BASE_URL:-https://copy.example.com}
+pasteboard_type=${COPYSYNC_PASTEBOARD_TYPE:-com.example.copysync}
+bundle_id=${COPYSYNC_BUNDLE_ID:-com.example.copysync}
+base_url=${base_url%/}
 rm -rf "$build"
 mkdir -p "$app/Contents/MacOS"
 mkdir -p "$app/Contents/Resources"
-clang -fobjc-arc "$root/CopySync.m" -framework Cocoa -framework ApplicationServices -framework Carbon -framework ServiceManagement -framework UserNotifications -framework WebKit -o "$app/Contents/MacOS/CopySync"
+clang -fobjc-arc \
+  "-DCOPYSYNC_BASE_URL=\"$base_url\"" \
+  "-DCOPYSYNC_PASTEBOARD_TYPE=\"$pasteboard_type\"" \
+  "$root/CopySync.m" -framework Cocoa -framework ApplicationServices -framework Carbon -framework ServiceManagement -framework UserNotifications -framework WebKit -o "$app/Contents/MacOS/CopySync"
 cp "$root/Info.plist" "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$app/Contents/Info.plist"
 cp "$root/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 # 使用固定的自签名证书（signing/copysync-sign.p12，CN=CopySync Local Signing），
 # 保证每次构建的 Designated Requirement 不变，macOS TCC（屏幕录制/辅助功能）授权在更新后仍然有效。

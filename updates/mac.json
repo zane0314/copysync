@@ -1,7 +1,7 @@
 {
   "version": "2.3",
   "build": 36,
-  "url": "https://copy-direct.example.com/updates/CopySync-Mac-latest.zip",
+  "url": "https://copy.example.com/updates/CopySync-Mac-latest.zip",
   "sha256": "a5b6928ebc54dc179b4d01f2a25cae7e0de843f4e8dee8d55400eb1153d3d1c4",
   "notes": "移除原生左侧栏，窗口仅显示网页界面（网页自带完整顶部导航），消除与 V3 网页导航重复及配色不一致；原生偏好设置仍可从菜单栏/状态栏进入。"
 }

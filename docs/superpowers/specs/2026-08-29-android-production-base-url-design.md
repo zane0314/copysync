@@ -6,7 +6,7 @@
 
 ## 已批准方案
 
-- 生产默认 API 基址改为 `https://copy-direct.example.com`。
+- 默认 API 基址改为安全占位地址；生产构建通过 `COPYSYNC_BASE_URL` 注入实际 HTTPS 地址。
 - 使用编译期 `COPYSYNC_BASE_URL` 覆盖开发或 Emulator 地址。
 - `restoreSession()` 保持现有“已存 baseUrl 优先”的行为。
 - 不增加 build flavor、依赖或迁移表。

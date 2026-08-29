@@ -33,7 +33,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('生产构建默认连接公网 API', () {
-    expect(app.defaultBaseUrl, 'https://copy-direct.example.com');
+    expect(app.defaultBaseUrl, 'https://copy.example.com');
   });
 }
 ```
@@ -49,7 +49,7 @@ void main() {
 ```dart
 const defaultBaseUrl = String.fromEnvironment(
   'COPYSYNC_BASE_URL',
-  defaultValue: 'https://copy-direct.example.com',
+  defaultValue: 'https://copy.example.com',
 );
 ```
 

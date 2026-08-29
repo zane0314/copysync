@@ -104,7 +104,7 @@
 ## 基线与线上版本事实（2026-08-24 核实）
 
 - 线上 Mac 清单：2.0/build 34（sha256 `957cf193…734478`）；copysync 2 仓库代码为 2.2/build 35（含 WebView 恢复修复，**尚未发布**）。
-- 线上 Android 清单：1.24/versionCode 25（sha256 `23690875…04d890`），与旧工程 `~/Documents/New project/copy-example` 的 APK 完全一致；copysync 2 的 `updates/android.json`（1.21/22，sha 不符）已过时。
+- 线上 Android 清单：1.24/versionCode 25（sha256 `23690875…04d890`），与旧工程 `<source-project>` 的 APK 完全一致；copysync 2 的 `updates/android.json`（1.21/22，sha 不符）已过时。
 - copysync 2 的 Android 源码树不完整：缺 `SyncService.java`、`AndroidManifest.xml`、`settings.gradle.kts`、wrapper 与 `viewReceivedFile/openDriveFile` 等 87 行差异；完整源在旧工程。
 - 结论：功能基线 = 线上生产构建（旧工程）∪ copysync 2 新增修复；Android 完整源码与基线 APK 以旧工程为准，阶段 3c 前需移植进 copysync 2。
 

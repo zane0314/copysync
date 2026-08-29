@@ -12,7 +12,7 @@
 
 - Modify only the macOS client, Mac update metadata, and their tests/artifacts.
 - Version must be `2.2`; build must be `35`.
-- Keep bundle identifier `com.example.copysync` and minimum macOS version `13.0`.
+- Keep the configurable bundle identifier (public default `com.example.copysync`) and minimum macOS version `13.0`.
 - Keep the existing `CopySync Local Signing` identity so TCC permissions survive replacement.
 - Do not modify or deploy the web backend or Android client.
 - Do not push GitHub or deploy the update server.
@@ -172,7 +172,7 @@ Copy the signed build into `/Applications/CopySync.app` with `ditto`, verify the
 
 - [ ] **Step 3: Verify installed state**
 
-Verify the installed signature, `2.2 (35)` metadata, running process, and successful HTTPS response from `https://copy-direct.example.com/?app=mac`.
+Verify the installed signature, `2.2 (35)` metadata, running process, and successful HTTPS response from the configured service URL.
 
 - [ ] **Step 4: Inject WebContent termination**
 

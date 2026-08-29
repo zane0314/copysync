@@ -7,6 +7,7 @@ import 'bridge/android_native_bridge.dart';
 import 'bridge/macos_native_bridge.dart';
 import 'bridge/native_bridge.dart';
 import 'bridge/update_checker.dart';
+import 'config.dart';
 import 'state/app_state.dart';
 import 'state/history_controller.dart';
 import 'state/menu_coordinator.dart';
@@ -15,10 +16,7 @@ import 'ui/home_shell.dart';
 import 'ui/login_page.dart';
 import 'ui/theme.dart';
 
-const defaultBaseUrl = String.fromEnvironment(
-  'COPYSYNC_BASE_URL',
-  defaultValue: 'https://copy-direct.example.com',
-);
+export 'config.dart' show defaultBaseUrl;
 
 void main() {
   // restoreSession 会走方法通道读 Keychain，必须先初始化绑定。
