@@ -16,6 +16,32 @@ void main() {
 
   tearDown(() => server.stop());
 
+  test('clearTemp 遇传输层瞬时中断（header 前断连）复用同一 idemKey 重试后成功', () async {
+    server.clearTempTransportFailures = 1; // 首次销毁连接，重试应成功
+    final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+    final result = await client.clearTemp(idemKey: 'idem-clear-1');
+    expect(result['ok'], true);
+    // 两次到达服务端：被中断的首次 + 成功的重试
+    final clearTempReqs = server.received
+        .where((r) => r.uri.path == '/api/v1/items/clear-temp')
+        .toList();
+    expect(clearTempReqs.length, 2);
+    for (final r in clearTempReqs) {
+      expect(r.headers.value('idempotency-key'), 'idem-clear-1',
+          reason: '重试必须复用同一幂等键以保证恰好一次');
+    }
+  });
+
+  test('clearTemp 传输错误超过重试次数仍失败则抛 network_error', () async {
+    server.clearTempTransportFailures = 5; // 超过重试预算
+    final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+    await expectLater(
+      client.clearTemp(idemKey: 'idem-clear-2'),
+      throwsA(isA<ApiException>()
+          .having((e) => e.code, 'code', 'network_error')),
+    );
+  });
+
   test('login 成功返回 token 与设备信息，请求体含 password/device_name/platform',
       () async {
     final client = ApiClient(baseUrl);
@@ -219,6 +245,26 @@ void main() {
             .having((e) => e.status, 'status', 507)
             .having((e) => e.code, 'code', 'storage_full')),
       );
+    });
+
+    test('超过 100MB 上限时客户端直接抛 413，不发起请求', () async {
+      final client = ApiClient(baseUrl)..token = 'cps_tok_1';
+      // 稀疏文件：长度超上限但不实际写入 100MB，length() 仍报完整长度。
+      final path = '${tempDir.path}/huge.bin';
+      final raf = await File(path).open(mode: FileMode.write);
+      await raf.setPosition(ApiClient.maxUploadBytes + 1);
+      await raf.writeByte(0);
+      await raf.close();
+
+      final before = server.received.length;
+      await expectLater(
+        () => client.uploadFile(path),
+        throwsA(isA<ApiException>()
+            .having((e) => e.status, 'status', 413)
+            .having((e) => e.code, 'code', 'file_too_large')),
+      );
+      // 提前拦截：不应触达服务端（避免服务端提前 413 关连接的 header 错误）。
+      expect(server.received.length, before);
     });
 
     test('同一幂等键重放返回首次结果', () async {

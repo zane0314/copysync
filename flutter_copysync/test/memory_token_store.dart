@@ -4,6 +4,7 @@ import 'package:copysync/state/token_store.dart';
 class MemoryTokenStore implements TokenStore {
   String? value;
   String? deviceId;
+  String? baseUrl;
 
   @override
   Future<String?> read() async => value;
@@ -15,6 +16,7 @@ class MemoryTokenStore implements TokenStore {
   Future<void> clear() async {
     value = null;
     deviceId = null;
+    // baseUrl 有意保留，与 SecureTokenStore 行为一致。
   }
 
   @override
@@ -22,4 +24,10 @@ class MemoryTokenStore implements TokenStore {
 
   @override
   Future<void> saveDeviceId(String id) async => deviceId = id;
+
+  @override
+  Future<String?> readBaseUrl() async => baseUrl;
+
+  @override
+  Future<void> saveBaseUrl(String url) async => baseUrl = url;
 }

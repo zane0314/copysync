@@ -129,13 +129,10 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
     [self.footerLabel.heightAnchor constraintEqualToConstant:28].active = YES;
     if ([NSUserDefaults.standardUserDefaults objectForKey:ShowFooterKey] == nil) [NSUserDefaults.standardUserDefaults setBool:YES forKey:ShowFooterKey];
     self.footerLabel.hidden = ![NSUserDefaults.standardUserDefaults boolForKey:ShowFooterKey];
-    NSView *sidebar = [self buildSidebar];
-    NSStackView *shell = [NSStackView stackViewWithViews:@[sidebar, content]];
-    shell.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-    shell.spacing = 0;
-    shell.distribution = NSStackViewDistributionFill;
-    [sidebar.widthAnchor constraintEqualToConstant:210].active = YES;
-    self.window.contentView = shell;
+    // 原生左侧栏已移除:V3 网页自带完整顶部导航(收件箱/传输历史/临时网盘/设置),
+    // 保留原生侧栏会造成导航重复且配色冲突。此处让 WKWebView 占满窗口,与网页/浏览器一致。
+    // buildSidebar / updateSidebarSelection / selectMacSection 保留定义,状态栏菜单仍可切换分区。
+    self.window.contentView = content;
     [self.window center];
     [self.window makeKeyAndOrderFront:nil];
     [self buildHistoryPanel];
@@ -810,6 +807,7 @@ static OSStatus windowHotKeyCallback(EventHandlerCallRef nextHandler, EventRef e
     NSRunningApplication *front = NSWorkspace.sharedWorkspace.frontmostApplication;
     if (![front.bundleIdentifier isEqualToString:NSBundle.mainBundle.bundleIdentifier]) self.previousApplication = front;
     [self refreshHistoryPanel];
+    [NSApp activateIgnoringOtherApps:YES];
     [self.historyPanel makeKeyAndOrderFront:nil];
     [NSUserDefaults.standardUserDefaults setBool:YES forKey:HistoryVisibleKey];
 }

@@ -51,8 +51,8 @@ class WebClipboardTest(unittest.TestCase):
         go = (app.WEB_DIR / "go.html").read_text(encoding="utf-8")
         self.assertIn("<title>CopySync</title>", html)
         self.assertIn('href="/favicon.png"', html)
-        self.assertIn('src="/app.js"', html)
-        self.assertIn('href="/app.css"', html)
+        self.assertIn('src="/app.js?v=20260828d"', html)
+        self.assertIn('href="/app.css?v=20260828d"', html)
         # 设计 §8.1 固定结构：侧栏、收件箱、传输历史、临时网盘、设置
         for marker in ('data-view="inbox"', 'data-view="transfers"', 'data-view="drive"',
                        'data-view="settings"', 'id="dropZone"', 'id="targetDevice"',
@@ -235,7 +235,7 @@ class WebClipboardTest(unittest.TestCase):
     def test_windows_device_is_removed_and_mac_is_renamed(self):
         with app.db() as conn:
             devices = {row["id"]: row for row in conn.execute("select id,name,enabled from devices")}
-        self.assertEqual(devices["mac"]["name"], "Mac")
+        self.assertEqual(devices["mac"]["name"], "Mac端")
         self.assertNotIn("windows", devices)
 
     def test_urlencoded_form_accepts_text(self):
@@ -1192,6 +1192,58 @@ class V1Case(unittest.TestCase):
         self.assertEqual(s, 401)
         self.assertEqual(b["error"]["code"], "unauthorized")
 
+    def test_v1_clear_temp_drains_body_no_connection_reset(self):
+        """clear-temp 根因排查回归：验证服务端处理带请求体的 clear-temp 后是正常 FIN 关闭而非 TCP RST。
+
+        排除“未读请求体 → 关闭时内核发 RST → 客户端读响应头前抛 Connection reset”这一假设：
+        Python http.server 的 rfile 是带缓冲的 makefile，读请求头时会把 {} 小 body 一并读入用户态
+        缓冲，内核接收缓冲无未读数据，故服务端正常 FIN 关闭。此测试确认该行为，并守护未来不因
+        body 处理变化而回退成 RST。（Android 上偶发的 header 前 HttpException 未在宿主栈复现，
+        当前证据指向 Android/模拟器网络层瞬时中断，而非服务端或协议缺陷。）"""
+        import socket
+        token, _ = self.login_device("ReproAndroid", "android")
+        self.v1_post_text(token, "clear-temp-drain-repro")  # 造一条可清理内容
+        body = b"{}"
+        request = (
+            "POST /api/v1/items/clear-temp HTTP/1.1\r\n"
+            "Host: 127.0.0.1\r\n"
+            f"Authorization: Bearer {token}\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode() + body
+        sock = socket.create_connection(
+            ("127.0.0.1", self.server.server_address[1]), timeout=10)
+        try:
+            sock.sendall(request)
+            sock.settimeout(10)
+            buf = b""
+            while b"\r\n\r\n" not in buf:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+            head, _, rest = buf.partition(b"\r\n\r\n")
+            self.assertIn(b"200", head.split(b"\r\n")[0])
+            length = 0
+            for line in head.split(b"\r\n"):
+                if line.lower().startswith(b"content-length:"):
+                    length = int(line.split(b":", 1)[1].strip())
+            while len(rest) < length:
+                more = sock.recv(4096)
+                if not more:
+                    break
+                rest += more
+            # 响应读净后再 recv：正常关闭得 EOF(b'')；未读 body 触发 RST 则抛 ConnectionResetError
+            try:
+                tail = sock.recv(4096)
+            except ConnectionResetError:
+                self.fail("服务端未读净请求体即关闭连接，触发 TCP RST（clear-temp 根因）")
+            self.assertEqual(tail, b"", "连接应正常 FIN 关闭，而非 RST")
+        finally:
+            sock.close()
+
     def test_v1_clear_all_removes_pinned_and_records_tombstones(self):
         token, dev = self.login_device("ClearAllWeb", "web")
         pinned = self.v1_post_text(token, "pinned stays nowhere")
@@ -1299,7 +1351,7 @@ class V1Case(unittest.TestCase):
         status, headers, data = self.raw_download("/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
-        self.assertIn(b'<script src="/app.js">', data)
+        self.assertIn(b'<script src="/app.js?v=20260828d">', data)
         self.assertNotIn(b"__FORCE_GO__", data)
 
     def test_static_assets_served_with_content_type(self):

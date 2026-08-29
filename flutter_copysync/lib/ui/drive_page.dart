@@ -39,11 +39,47 @@ class _DrivePageState extends State<DrivePage> {
   }
 
   Future<void> _upload() async {
-    final file = await openFile(
-        acceptedTypeGroups: [const XTypeGroup(label: '文件')]);
-    if (file == null) return; // 用户取消
-    final ok = await state.sendFile(file.path);
-    if (ok) await state.loadUsage();
+    String? path;
+    var cleanupPath = false;
+    final android = state.android;
+    if (Platform.isAndroid && android != null) {
+      final result = await android.pickFile();
+      if (!result.ok) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(result.errorMessage ?? '选择文件失败')),
+          );
+        }
+        return;
+      }
+      path = result.value?.path;
+      cleanupPath = path != null && path.isNotEmpty;
+    } else {
+      final file = await openFile(
+        acceptedTypeGroups: [const XTypeGroup(label: '文件')],
+      );
+      path = file?.path;
+    }
+    final selectedPath = path;
+    if (selectedPath == null || selectedPath.isEmpty) return; // 用户取消
+    try {
+      final ok = await state.sendFile(selectedPath);
+      if (ok) await state.loadUsage();
+    } finally {
+      if (cleanupPath) {
+        final pickedFile = File(selectedPath);
+        try {
+          await pickedFile.delete();
+        } on FileSystemException {
+          // 原生选择器已清理或文件已被系统回收。
+        }
+        try {
+          await pickedFile.parent.delete();
+        } on FileSystemException {
+          // 父目录已清理或仍有其他文件时保留。
+        }
+      }
+    }
   }
 
   @override
@@ -59,11 +95,17 @@ class _DrivePageState extends State<DrivePage> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.xl, AppSpacing.xl, AppSpacing.xl, AppSpacing.md),
+                  AppSpacing.xl,
+                  AppSpacing.xl,
+                  AppSpacing.xl,
+                  AppSpacing.md,
+                ),
                 child: Row(
                   children: [
-                    Text('临时网盘',
-                        style: Theme.of(context).textTheme.headlineSmall),
+                    Text(
+                      '临时网盘',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
                     const Spacer(),
                     ElevatedButton.icon(
                       key: const Key('driveRefreshButton'),
@@ -74,13 +116,12 @@ class _DrivePageState extends State<DrivePage> {
                         backgroundColor: AppColors.primarySoft,
                         foregroundColor: AppColors.primary,
                       ),
-                      onPressed:
-                          state.refreshStatus == OpStatus.loading
-                              ? null
-                              : () async {
-                                  await state.refresh();
-                                  await state.loadUsage();
-                                },
+                      onPressed: state.refreshStatus == OpStatus.loading
+                          ? null
+                          : () async {
+                              await state.refresh();
+                              await state.loadUsage();
+                            },
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     ElevatedButton.icon(
@@ -95,18 +136,26 @@ class _DrivePageState extends State<DrivePage> {
               if (state.usageInfo != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.xl, vertical: AppSpacing.xs),
+                    horizontal: AppSpacing.xl,
+                    vertical: AppSpacing.xs,
+                  ),
                   child: Text(
                     '已用 ${formatSize(state.usageInfo!.totalBytes)} / '
                     '${formatSize(state.usageInfo!.tempLimit)}',
                     style: const TextStyle(
-                        color: AppColors.textSecondary, fontSize: 12),
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
               // 搜索 + 类型筛选（与网页端同语义：本地列表过滤）。
               Padding(
                 padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.xl, AppSpacing.xs, AppSpacing.xl, 0),
+                  AppSpacing.xl,
+                  AppSpacing.xs,
+                  AppSpacing.xl,
+                  0,
+                ),
                 child: TextField(
                   key: const Key('driveSearchField'),
                   decoration: const InputDecoration(
@@ -119,14 +168,19 @@ class _DrivePageState extends State<DrivePage> {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.xl, AppSpacing.sm, AppSpacing.xl, 0),
+                  AppSpacing.xl,
+                  AppSpacing.sm,
+                  AppSpacing.xl,
+                  0,
+                ),
                 child: Wrap(
                   spacing: AppSpacing.sm,
                   children: [
                     for (var i = 0; i < _kindFilters.length; i++)
                       ChoiceChip(
                         key: Key(
-                            'driveFilter-${_kindFilters[i].isEmpty ? 'all' : _kindFilters[i]}'),
+                          'driveFilter-${_kindFilters[i].isEmpty ? 'all' : _kindFilters[i]}',
+                        ),
                         label: Text(_kindLabels[i]),
                         selected: _kindFilter == _kindFilters[i],
                         onSelected: (_) =>
@@ -144,24 +198,32 @@ class _DrivePageState extends State<DrivePage> {
                       ? LayoutBuilder(
                           builder: (context, constraints) =>
                               SingleChildScrollView(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                  minHeight: constraints.maxHeight),
-                              child: const Center(
-                                  child: Text('网盘为空',
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    minHeight: constraints.maxHeight,
+                                  ),
+                                  child: const Center(
+                                    child: Text(
+                                      '网盘为空',
                                       style: TextStyle(
-                                          color: AppColors.textSecondary))),
-                            ),
-                          ),
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
                         )
                       : ListView.separated(
                           physics: const AlwaysScrollableScrollPhysics(),
                           padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.xl),
+                            horizontal: AppSpacing.xl,
+                          ),
                           itemCount: items.length,
                           separatorBuilder: (context, index) => const Divider(
-                              height: 1, color: AppColors.hairline),
+                            height: 1,
+                            color: AppColors.hairline,
+                          ),
                           itemBuilder: (context, index) =>
                               _tileFor(context, items[index]),
                         ),
@@ -185,9 +247,11 @@ class _DrivePageState extends State<DrivePage> {
     final q = _query.trim().toLowerCase();
     if (q.isNotEmpty) {
       result = result
-          .where((i) =>
-              i.text.toLowerCase().contains(q) ||
-              i.name.toLowerCase().contains(q))
+          .where(
+            (i) =>
+                i.text.toLowerCase().contains(q) ||
+                i.name.toLowerCase().contains(q),
+          )
           .toList();
     }
     return result;
@@ -204,6 +268,10 @@ class _DrivePageState extends State<DrivePage> {
           item: item,
           sourceLabel: state.deviceDisplayName(item.sourceDevice),
           statusText: formatExpiry(item),
+          onEditNote: (note) async {
+            final ok = await state.updateNote(item.id, note);
+            return ok ? null : state.entryError(item.id) ?? '备注保存失败';
+          },
           primaryAction: canDownload
               ? IconButton(
                   key: Key('drive-download-${item.id}'),
@@ -215,8 +283,9 @@ class _DrivePageState extends State<DrivePage> {
                         )
                       : const Icon(Icons.download_outlined),
                   tooltip: '下载',
-                  onPressed:
-                      op == OpStatus.loading ? null : () => _download(item),
+                  onPressed: op == OpStatus.loading
+                      ? null
+                      : () => _download(item),
                 )
               : null,
           menuItems: [
@@ -234,24 +303,26 @@ class _DrivePageState extends State<DrivePage> {
             ),
             PopupMenuItem(
               onTap: () async {
-                final title =
-                    item.kind == 'text' ? item.text : item.name;
+                final title = item.kind == 'text' ? item.text : item.name;
                 if (await confirmDelete(context, title)) {
                   await state.deleteItemById(item.id);
                   await state.loadUsage();
                 }
               },
-              child:
-                  const Text('删除', style: TextStyle(color: AppColors.danger)),
+              child: const Text(
+                '删除',
+                style: TextStyle(color: AppColors.danger),
+              ),
             ),
           ],
         ),
         if (error != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
-            child: Text(error,
-                style:
-                    const TextStyle(color: AppColors.danger, fontSize: 12)),
+            child: Text(
+              error,
+              style: const TextStyle(color: AppColors.danger, fontSize: 12),
+            ),
           ),
       ],
     );
@@ -263,14 +334,18 @@ class _DrivePageState extends State<DrivePage> {
       final bridge = widget.bridge;
       if (bridge != null) {
         final saved = await bridge.filesSaveSent(
-            itemId: item.id, name: item.name, data: bytes);
+          itemId: item.id,
+          name: item.name,
+          data: bytes,
+        );
         if (saved.ok) {
           debugPrint('已保存：${saved.value}');
           return;
         }
       }
       final target = File(
-          '${Directory.systemTemp.path}/copysync_${item.id}_${item.name}');
+        '${Directory.systemTemp.path}/copysync_${item.id}_${item.name}',
+      );
       await target.writeAsBytes(bytes);
       debugPrint('已保存到临时目录：${target.path}');
     } on ApiException catch (e) {

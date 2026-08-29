@@ -19,6 +19,76 @@ class AppState extends ChangeNotifier {
   final ApiClient api;
   final TokenStore tokenStore;
 
+  bool _disposed = false;
+  bool _realtimeSyncRequested = false;
+  StreamSubscription<int>? _eventsSubscription;
+  Timer? _eventsReconnectTimer;
+  int _eventsGeneration = 0;
+  static const _eventsReconnectDelay = Duration(seconds: 2);
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  /// 绑定实时同步生命周期；登录/恢复后连接，注销或销毁状态时取消。
+  void startRealtimeSync() {
+    if (_disposed) return;
+    _realtimeSyncRequested = true;
+    _connectEvents();
+  }
+
+  void _connectEvents() {
+    if (_disposed ||
+        !_realtimeSyncRequested ||
+        !isLoggedIn ||
+        _eventsSubscription != null ||
+        _eventsReconnectTimer != null) {
+      return;
+    }
+    final generation = ++_eventsGeneration;
+    final subscription = api.events().listen(
+      (_) {
+        if (_eventConnectionIsCurrent(generation)) unawaited(refresh());
+      },
+      onError: (_) => _eventConnectionEnded(generation),
+      onDone: () => _eventConnectionEnded(generation),
+    );
+    _eventsSubscription = subscription;
+  }
+
+  bool _eventConnectionIsCurrent(int generation) =>
+      !_disposed &&
+      _realtimeSyncRequested &&
+      isLoggedIn &&
+      generation == _eventsGeneration;
+
+  void _eventConnectionEnded(int generation) {
+    if (!_eventConnectionIsCurrent(generation)) return;
+    _eventsSubscription = null;
+    _eventsReconnectTimer ??= Timer(_eventsReconnectDelay, () {
+      _eventsReconnectTimer = null;
+      _connectEvents();
+    });
+  }
+
+  void _stopRealtimeSync() {
+    ++_eventsGeneration;
+    _eventsReconnectTimer?.cancel();
+    _eventsReconnectTimer = null;
+    final subscription = _eventsSubscription;
+    _eventsSubscription = null;
+    if (subscription != null) unawaited(subscription.cancel());
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _realtimeSyncRequested = false;
+    _stopRealtimeSync();
+    super.dispose();
+  }
+
   /// Android 原生能力（通知/后台服务/下载/分享/转存）；非 Android 平台为 null。
   /// main() 在创建 AppState 后按平台注入。
   AndroidHost? android;
@@ -65,9 +135,12 @@ class AppState extends ChangeNotifier {
   // ---- 网盘 ----
   UsageInfo? usageInfo;
 
-  // ---- 设置：修改密码 / 彻底清空 ----
+  // ---- 设置：修改密码 / 清理临时内容 / 彻底清空 ----
   OpStatus passwordStatus = OpStatus.idle;
   String? passwordError;
+  OpStatus clearTempStatus = OpStatus.idle;
+  String? clearTempError;
+  int clearTempDeleted = 0;
   OpStatus clearAllStatus = OpStatus.idle;
   String? clearAllError;
   int clearAllDeleted = 0;
@@ -117,11 +190,13 @@ class AppState extends ChangeNotifier {
       );
       await tokenStore.save(result.token);
       await tokenStore.saveDeviceId(result.device.id);
+      await tokenStore.saveBaseUrl(api.baseUrl);
       device = result.device;
       restoredDeviceId = result.device.id;
       loginStatus = OpStatus.success;
       notifyListeners();
       _androidSessionStart();
+      _connectEvents();
       return true;
     } on ApiException catch (e) {
       loginStatus = OpStatus.error;
@@ -132,16 +207,25 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> restoreSession() async {
+    // 先恢复服务端地址，避免回退到仅供模拟器用的默认地址而拉不到历史/网盘。
+    final savedBaseUrl = await tokenStore.readBaseUrl();
+    if (savedBaseUrl != null && savedBaseUrl.isNotEmpty) {
+      api.baseUrl = savedBaseUrl;
+    }
     final token = await tokenStore.read();
     if (token != null && token.isNotEmpty) {
       api.token = token;
       restoredDeviceId = await tokenStore.readDeviceId();
       notifyListeners();
       _androidSessionStart();
+      _connectEvents();
+      // 恢复会话后立即拉取传输历史与临时网盘内容。
+      unawaited(refresh());
     }
   }
 
   Future<void> logout() async {
+    _stopRealtimeSync();
     try {
       await api.logout(); // 尽力撤销服务端 token；失败仍清本地。
     } on ApiException {
@@ -162,6 +246,8 @@ class AppState extends ChangeNotifier {
     loginStatus = OpStatus.idle;
     passwordStatus = OpStatus.idle;
     passwordError = null;
+    clearTempStatus = OpStatus.idle;
+    clearTempError = null;
     clearAllStatus = OpStatus.idle;
     clearAllError = null;
     notifiedDeliveryIds.clear();
@@ -320,9 +406,9 @@ class AppState extends ChangeNotifier {
       );
       _upsertItem(item);
       _pendingIdemKey = null;
+      await _androidSaveSent(item, path);
       sendStatus = OpStatus.success;
       notifyListeners();
-      _androidSaveSent(item, path);
       return true;
     } on ApiException catch (e) {
       sendStatus = OpStatus.error;
@@ -362,6 +448,12 @@ class AppState extends ChangeNotifier {
   /// 图钉开关（置顶后永久保留）。
   Future<bool> setPinned(String id, bool pinned) => _entryCall(id, () async {
         _upsertItem(await api.patchItem(id, pinned: pinned, idemKey: _newIdemKey()));
+      });
+
+  /// 保存条目备注；失败保留原条目，调用方可按原状态重试。
+  Future<bool> updateNote(String id, String note) => _entryCall(id, () async {
+        _upsertItem(await api.patchItem(id,
+            note: note.trim(), idemKey: _newIdemKey()));
       });
 
   /// 拉取容量与限制。
@@ -413,6 +505,30 @@ class AppState extends ChangeNotifier {
     } on ApiException catch (e) {
       clearAllStatus = OpStatus.error;
       clearAllError = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// 清理未固定的临时内容；成功后只移除本地未固定条目。
+  Future<bool> clearTempItems() async {
+    if (clearTempStatus == OpStatus.loading) return false;
+    clearTempStatus = OpStatus.loading;
+    clearTempError = null;
+    notifyListeners();
+    try {
+      final result = await api.clearTemp(idemKey: _newIdemKey());
+      clearTempDeleted = (result['deleted'] as num?)?.toInt() ?? 0;
+      final remainingIds = items.where((item) => item.pinned).map((i) => i.id).toSet();
+      items.removeWhere((item) => !item.pinned);
+      deliveries.removeWhere((delivery) => !remainingIds.contains(delivery.itemId));
+      observedDeliveryIds.clear();
+      clearTempStatus = OpStatus.success;
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      clearTempStatus = OpStatus.error;
+      clearTempError = e.message;
       notifyListeners();
       return false;
     }
@@ -505,13 +621,14 @@ class AppState extends ChangeNotifier {
 
   /// 发送成功后把已发送文件转存 Download/CopySync（旧版 sent: 前缀语义，
   /// 前缀由原生侧处理）；尽力而为，失败不影响发送结果。
-  void _androidSaveSent(Item item, String path) {
+  Future<void> _androidSaveSent(Item item, String path) async {
     final host = android;
     if (host == null) return;
-    _ignoreAndroid(() async {
-      final bytes = await File(path).readAsBytes();
-      await host.filesSaveSent(itemId: item.id, name: item.name, data: bytes);
-    }());
+    try {
+      await host.filesSaveSent(itemId: item.id, name: item.name, path: path);
+    } catch (_) {
+      // 已上传成功；本地转存失败不改变发送结果。
+    }
   }
 
   void _upsertItem(Item item) {

@@ -1,7 +1,7 @@
 {
-  "version": "1.21",
-  "versionCode": 22,
+  "version": "2.0.3",
+  "versionCode": 29,
   "url": "https://copy-direct.example.com/updates/CopyWeb-Android-latest.apk",
-  "sha256": "7f0f49424f7707dee2dfa32681d8723427406144c9df94de721aea3f5ad56298",
-  "notes": "文件定位改为调用手机自带文件管理器并在独立任务中打开 Download/CopySync：三星优先使用“我的文件”，其次尝试 Google Files 与系统文件管理器；不再在 CopySync 任务内打开文档选择器，返回键和最近任务均可正常回到 CopySync。保留 1.20 的点击文件防闪退保护。"
+  "sha256": "c6f1b407c96334c893b5a061dfb575a09a040b1bbc6b4d0a985bd8c451addff1",
+  "notes": "修复旧版升级后保留 token 但缺少服务器地址时误连 Emulator 专用地址，导致临时网盘、传输历史和上传全部连接重置；生产默认 API 地址改为 https://copy-direct.example.com，开发环境可用 COPYSYNC_BASE_URL 覆盖；保留大文件全链路流式处理与 100MB 客户端守卫。"
 }

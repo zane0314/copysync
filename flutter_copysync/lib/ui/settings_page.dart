@@ -90,6 +90,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _passwordTile(),
               const SizedBox(height: AppSpacing.lg),
               _sectionTitle('危险操作'),
+              _clearTempTile(),
               _clearAllTile(),
               const SizedBox(height: AppSpacing.xl),
               Center(
@@ -352,6 +353,68 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!ok && mounted) {
       setState(() {}); // passwordError 经 ListenableBuilder 刷新到副标题
     }
+  }
+
+  /// 只清理未固定内容：两个连续确认对话框（二次确认），都确认才执行。
+  Widget _clearTempTile() {
+    return _actionTile(
+      icon: Icons.cleaning_services_outlined,
+      title: '清理临时内容',
+      subtitle: switch (state.clearTempStatus) {
+        OpStatus.success => '已清理 ${state.clearTempDeleted} 项，已固定内容保留',
+        OpStatus.error => state.clearTempError,
+        _ => '只删除未固定内容，已固定内容保留，需二次确认',
+      },
+      buttonKey: const Key('clearTempButton'),
+      buttonLabel: state.clearTempStatus == OpStatus.loading ? '清理中' : '清理临时内容',
+      onPressed: state.clearTempStatus == OpStatus.loading
+          ? null
+          : () => _confirmClearTemp(),
+    );
+  }
+
+  Future<void> _confirmClearTemp() async {
+    final first = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('清理临时内容？'),
+        content: const Text('只删除未固定内容，已固定内容保留。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('clearTempConfirm1'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('继续'),
+          ),
+        ],
+      ),
+    );
+    if (first != true || !mounted) return;
+    final second = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('再次确认清理临时内容'),
+        content: const Text('将删除所有未固定内容，已固定内容不会删除。'),
+        actions: [
+          TextButton(
+            key: const Key('clearTempCancel2'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('clearTempConfirm2'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('确认清理'),
+          ),
+        ],
+      ),
+    );
+    if (second != true || !mounted) return;
+    await state.clearTempItems();
   }
 
   /// 彻底清空：两个连续确认对话框（二次确认），都确认才执行。

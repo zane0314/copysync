@@ -66,8 +66,11 @@ void main() {
       final bridge = AndroidNativeBridge();
       await bridge.clipboardWrite(text: 'abc');
       expect(lastCall().method, 'clipboard.write');
-      expect(lastCall().arguments,
-          {'kind': 'text', 'text': 'abc', 'ignoreNext': false});
+      expect(lastCall().arguments, {
+        'kind': 'text',
+        'text': 'abc',
+        'ignoreNext': false,
+      });
       final png = Uint8List.fromList([9]);
       await bridge.clipboardWrite(png: png, ignoreNext: true);
       expect(lastCall().arguments, {
@@ -134,7 +137,12 @@ void main() {
       'id': 'share-1',
       'text': '分享的文本',
       'files': [
-        {'name': 'a.png', 'mime': 'image/png', 'path': '/cache/share_inbox/a.png', 'size': 12},
+        {
+          'name': 'a.png',
+          'mime': 'image/png',
+          'path': '/cache/share_inbox/a.png',
+          'size': 12,
+        },
       ],
     };
 
@@ -182,6 +190,31 @@ void main() {
     });
   });
 
+  group('picker', () {
+    test(
+      'openFile returns path metadata without transferring file bytes',
+      () async {
+        handler = (_) => {
+          'path': '/data/user/0/xyz.copyweb/cache/picker/photo.bin',
+          'name': 'photo.bin',
+          'mime': 'application/octet-stream',
+          'size': 104857601,
+        };
+        final bridge = AndroidNativeBridge();
+        final result = await bridge.pickFile(imagesOnly: true);
+        expect(result.ok, isTrue);
+        expect(
+          result.value!.path,
+          '/data/user/0/xyz.copyweb/cache/picker/photo.bin',
+        );
+        expect(result.value!.name, 'photo.bin');
+        expect(result.value!.size, 104857601);
+        expect(lastCall().method, 'picker.openFile');
+        expect(lastCall().arguments, {'imagesOnly': true});
+      },
+    );
+  });
+
   group('download', () {
     test('enqueue 透传 url/deliveryId/name/mime/headers，返回下载 id', () async {
       handler = (_) => 42;
@@ -207,11 +240,11 @@ void main() {
 
     test('reconcile 解析各状态（ready/pending/failed/missing）', () async {
       handler = (_) => [
-            {'deliveryId': 'd1', 'name': 'a.zip', 'state': 'ready'},
-            {'deliveryId': 'd2', 'name': 'b.zip', 'state': 'pending'},
-            {'deliveryId': 'd3', 'name': 'c.zip', 'state': 'failed'},
-            {'deliveryId': 'd4', 'name': 'd.zip', 'state': 'missing'},
-          ];
+        {'deliveryId': 'd1', 'name': 'a.zip', 'state': 'ready'},
+        {'deliveryId': 'd2', 'name': 'b.zip', 'state': 'pending'},
+        {'deliveryId': 'd3', 'name': 'c.zip', 'state': 'failed'},
+        {'deliveryId': 'd4', 'name': 'd.zip', 'state': 'missing'},
+      ];
       final bridge = AndroidNativeBridge();
       final result = await bridge.downloadReconcile();
       expect(result.ok, isTrue);
@@ -228,7 +261,11 @@ void main() {
       handler = (_) => systemError();
       final bridge = AndroidNativeBridge();
       final result = await bridge.downloadEnqueue(
-          url: 'http://x/a', deliveryId: 'd1', name: 'a', mime: '');
+        url: 'http://x/a',
+        deliveryId: 'd1',
+        name: 'a',
+        mime: '',
+      );
       expect(result.ok, isFalse);
       expect(result.errorCode, 'system_error');
     });
@@ -238,16 +275,18 @@ void main() {
     test('saveSent 返回落盘名并透传参数', () async {
       handler = (_) => 'a.txt';
       final bridge = AndroidNativeBridge();
-      final data = Uint8List.fromList(utf8.encode('hi'));
       final result = await bridge.filesSaveSent(
-          itemId: 'item-1', name: 'a.txt', data: data);
+        itemId: 'item-1',
+        name: 'a.txt',
+        path: '/data/user/0/xyz.copyweb/cache/picker/a.txt',
+      );
       expect(result.ok, isTrue);
       expect(result.value, 'a.txt');
       expect(lastCall().method, 'files.saveSent');
       expect(lastCall().arguments, {
         'itemId': 'item-1',
         'name': 'a.txt',
-        'dataBase64': base64Encode(data),
+        'path': '/data/user/0/xyz.copyweb/cache/picker/a.txt',
       });
     });
 
@@ -255,7 +294,10 @@ void main() {
       handler = (_) => 'x.png';
       final bridge = AndroidNativeBridge();
       await bridge.filesSaveReceived(
-          deliveryId: 'd1', name: 'x.png', data: Uint8List(0));
+        deliveryId: 'd1',
+        name: 'x.png',
+        data: Uint8List(0),
+      );
       expect(lastCall().method, 'files.saveReceived');
       expect((lastCall().arguments as Map)['deliveryId'], 'd1');
     });
@@ -263,12 +305,13 @@ void main() {
     test('revealReceived 命中方法名；接收中映射 not_ready', () async {
       handler = (_) => 'b.zip';
       final bridge = AndroidNativeBridge();
-      final revealed =
-          await bridge.filesRevealReceived(deliveryId: 'd1', name: 'b.zip');
+      final revealed = await bridge.filesRevealReceived(
+        deliveryId: 'd1',
+        name: 'b.zip',
+      );
       expect(revealed.ok, isTrue);
       expect(lastCall().method, 'files.revealReceived');
-      handler = (_) =>
-          PlatformException(code: 'not_ready', message: '文件仍在接收中');
+      handler = (_) => PlatformException(code: 'not_ready', message: '文件仍在接收中');
       final pending = await bridge.filesRevealReceived(name: 'b.zip');
       expect(pending.ok, isFalse);
       expect(pending.errorCode, 'not_ready');
@@ -277,15 +320,23 @@ void main() {
     test('openReceived 透传 name/mime；无查看器映射 not_found', () async {
       final bridge = AndroidNativeBridge();
       final opened = await bridge.filesOpenReceived(
-          deliveryId: 'd1', name: 'b.png', mime: 'image/png');
+        deliveryId: 'd1',
+        name: 'b.png',
+        mime: 'image/png',
+      );
       expect(opened.ok, isTrue);
       expect(lastCall().method, 'files.openReceived');
-      expect(lastCall().arguments,
-          {'deliveryId': 'd1', 'name': 'b.png', 'mime': 'image/png'});
+      expect(lastCall().arguments, {
+        'deliveryId': 'd1',
+        'name': 'b.png',
+        'mime': 'image/png',
+      });
       handler = (_) =>
           PlatformException(code: 'not_found', message: '没有可打开该文件的应用');
-      final missing =
-          await bridge.filesOpenReceived(name: 'b.png', mime: 'image/png');
+      final missing = await bridge.filesOpenReceived(
+        name: 'b.png',
+        mime: 'image/png',
+      );
       expect(missing.ok, isFalse);
       expect(missing.errorCode, 'not_found');
     });
@@ -293,8 +344,10 @@ void main() {
     test('openReceived 用户取消映射 cancelled', () async {
       handler = (_) => cancelled();
       final bridge = AndroidNativeBridge();
-      final result =
-          await bridge.filesOpenReceived(name: 'b.png', mime: 'image/png');
+      final result = await bridge.filesOpenReceived(
+        name: 'b.png',
+        mime: 'image/png',
+      );
       expect(result.ok, isFalse);
       expect(result.errorCode, 'cancelled');
     });
@@ -303,13 +356,13 @@ void main() {
   group('update', () {
     test('check 解析清单比较结果', () async {
       handler = (_) => {
-            'current': '24',
-            'latest': '25',
-            'hasUpdate': true,
-            'notes': '修复',
-            'url': 'https://x/app.apk',
-            'sha256': 'ab',
-          };
+        'current': '24',
+        'latest': '25',
+        'hasUpdate': true,
+        'notes': '修复',
+        'url': 'https://x/app.apk',
+        'sha256': 'ab',
+      };
       final bridge = AndroidNativeBridge();
       final result = await bridge.updateCheck('https://x/api/update/android');
       expect(result.ok, isTrue);
@@ -322,15 +375,19 @@ void main() {
     test('download 返回 apk 路径；校验失败映射 checksum_mismatch', () async {
       handler = (_) => '/dl/CopySync-update.apk';
       final bridge = AndroidNativeBridge();
-      final downloaded =
-          await bridge.updateDownload(url: 'https://x/a.apk', sha256: 'ab');
+      final downloaded = await bridge.updateDownload(
+        url: 'https://x/a.apk',
+        sha256: 'ab',
+      );
       expect(downloaded.value, '/dl/CopySync-update.apk');
       expect(lastCall().method, 'update.download');
       expect(lastCall().arguments, {'url': 'https://x/a.apk', 'sha256': 'ab'});
-      handler = (_) => PlatformException(
-          code: 'checksum_mismatch', message: '更新下载或校验失败');
-      final bad =
-          await bridge.updateDownload(url: 'https://x/a.apk', sha256: 'ab');
+      handler = (_) =>
+          PlatformException(code: 'checksum_mismatch', message: '更新下载或校验失败');
+      final bad = await bridge.updateDownload(
+        url: 'https://x/a.apk',
+        sha256: 'ab',
+      );
       expect(bad.ok, isFalse);
       expect(bad.errorCode, 'checksum_mismatch');
     });
@@ -355,7 +412,8 @@ void main() {
       await messenger.handlePlatformMessage(
         'xyz.copysync/bridge',
         codec.encodeMethodCall(
-            const MethodCall('share.pending', {'id': 'share-9'})),
+          const MethodCall('share.pending', {'id': 'share-9'}),
+        ),
         (_) {},
       );
       final event = await future;

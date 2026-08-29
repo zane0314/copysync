@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CopySync</title>
   <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/app.css?v=20260828d">
 </head>
 <body>
   <div class="bg-decor" aria-hidden="true"></div>
@@ -51,7 +51,10 @@
             <h1>收件箱</h1>
             <p class="online-line"><span class="dot"></span><span id="onlineCount">设备连接中…</span></p>
           </div>
-          <button type="button" class="btn soft" id="refreshBtn"><span class="btn-icon" data-icon="refresh"></span>刷新</button>
+          <div class="head-actions">
+            <button type="button" class="btn soft" id="markAllReadBtn" hidden>全部已读</button>
+            <button type="button" class="btn soft" id="refreshBtn"><span class="btn-icon" data-icon="refresh"></span>刷新</button>
+          </div>
         </header>
 
         <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="拖文件到这里上传">
@@ -153,6 +156,6 @@
   <input id="imageInput" type="file" accept="image/*" multiple hidden>
   <input id="driveFiles" type="file" multiple hidden>
 
-  <script src="/app.js"></script>
+  <script src="/app.js?v=20260828d"></script>
 </body>
 </html>

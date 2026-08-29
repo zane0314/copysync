@@ -55,23 +55,56 @@ class _InboxPageState extends State<InboxPage> {
   }
 
   Future<void> _pickAndSend({required bool image}) async {
-    final file = await openFile(
-      acceptedTypeGroups: [
-        if (image)
-          const XTypeGroup(
-            label: '图片',
-            extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'],
-          )
-        else
-          const XTypeGroup(label: '文件'),
-      ],
-    );
-    if (file == null) return; // 用户取消
-    final target = _targetDevice.isEmpty ? null : _targetDevice;
-    if (image) {
-      await state.sendImage(file.path, targetDevice: target);
+    String? path;
+    var cleanupPath = false;
+    final android = state.android;
+    if (Platform.isAndroid && android != null) {
+      final result = await android.pickFile(imagesOnly: image);
+      if (!result.ok) {
+        if (mounted) {
+          setState(() => _pasteHint = result.errorMessage ?? '选择文件失败');
+        }
+        return;
+      }
+      path = result.value?.path;
+      cleanupPath = path != null && path.isNotEmpty;
     } else {
-      await state.sendFile(file.path, targetDevice: target);
+      final file = await openFile(
+        acceptedTypeGroups: [
+          if (image)
+            const XTypeGroup(
+              label: '图片',
+              extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'],
+            )
+          else
+            const XTypeGroup(label: '文件'),
+        ],
+      );
+      path = file?.path;
+    }
+    final selectedPath = path;
+    if (selectedPath == null || selectedPath.isEmpty) return; // 用户取消
+    final target = _targetDevice.isEmpty ? null : _targetDevice;
+    try {
+      if (image) {
+        await state.sendImage(selectedPath, targetDevice: target);
+      } else {
+        await state.sendFile(selectedPath, targetDevice: target);
+      }
+    } finally {
+      if (cleanupPath) {
+        final pickedFile = File(selectedPath);
+        try {
+          await pickedFile.delete();
+        } on FileSystemException {
+          // 原生选择器已清理或文件已被系统回收。
+        }
+        try {
+          await pickedFile.parent.delete();
+        } on FileSystemException {
+          // 父目录已清理或仍有其他文件时保留。
+        }
+      }
     }
   }
 
@@ -87,8 +120,12 @@ class _InboxPageState extends State<InboxPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.xl,
-                    AppSpacing.xl, AppSpacing.xl, AppSpacing.md),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.xl,
+                  AppSpacing.xl,
+                  AppSpacing.xl,
+                  AppSpacing.md,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -96,19 +133,26 @@ class _InboxPageState extends State<InboxPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('收件箱',
-                              style:
-                                  Theme.of(context).textTheme.headlineSmall),
+                          Text(
+                            '收件箱',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
                           const SizedBox(height: AppSpacing.xs + 2),
                           Row(
                             children: [
-                              const Icon(Icons.circle,
-                                  size: 9, color: AppColors.success),
+                              const Icon(
+                                Icons.circle,
+                                size: 9,
+                                color: AppColors.success,
+                              ),
                               const SizedBox(width: AppSpacing.sm),
-                              Text('${state.onlineDeviceCount} 台设备在线',
-                                  style: const TextStyle(
-                                      color: AppColors.textSecondary,
-                                      fontSize: 13)),
+                              Text(
+                                '${state.onlineDeviceCount} 台设备在线',
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 13,
+                                ),
+                              ),
                             ],
                           ),
                         ],
@@ -121,8 +165,7 @@ class _InboxPageState extends State<InboxPage> {
                           ? const SizedBox(
                               width: 16,
                               height: 16,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.refresh, size: 17),
                       label: const Text('刷新'),
@@ -137,30 +180,42 @@ class _InboxPageState extends State<InboxPage> {
               ),
               _buildDropZone(sending),
               Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.xl,
-                    AppSpacing.xs, AppSpacing.xl, AppSpacing.xs),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.xl,
+                  AppSpacing.xs,
+                  AppSpacing.xl,
+                  AppSpacing.xs,
+                ),
                 child: _buildSendBar(sending),
               ),
               if (_pasteHint != null)
                 Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
-                  child: Text(_pasteHint!,
-                      style: const TextStyle(
-                          color: AppColors.warning, fontSize: 13)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xl,
+                  ),
+                  child: Text(
+                    _pasteHint!,
+                    style: const TextStyle(
+                      color: AppColors.warning,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
-              if (state.sendStatus == OpStatus.error &&
-                  state.sendError != null)
+              if (state.sendStatus == OpStatus.error && state.sendError != null)
                 Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
-                  child: Text(state.sendError!,
-                      style: const TextStyle(color: AppColors.danger)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xl,
+                  ),
+                  child: Text(
+                    state.sendError!,
+                    style: const TextStyle(color: AppColors.danger),
+                  ),
                 ),
               if (state.refreshStatus == OpStatus.error)
                 Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xl,
+                  ),
                   child: Row(
                     children: [
                       Expanded(
@@ -179,12 +234,19 @@ class _InboxPageState extends State<InboxPage> {
                 ),
               const Padding(
                 padding: EdgeInsets.fromLTRB(
-                    AppSpacing.xl, AppSpacing.md, AppSpacing.xl, 0),
-                child: Text('我的文件',
-                    style: TextStyle(
-                        color: AppColors.ink,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600)),
+                  AppSpacing.xl,
+                  AppSpacing.md,
+                  AppSpacing.xl,
+                  0,
+                ),
+                child: Text(
+                  '我的文件',
+                  style: TextStyle(
+                    color: AppColors.ink,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
               Expanded(child: _buildList()),
             ],
@@ -198,7 +260,9 @@ class _InboxPageState extends State<InboxPage> {
   Widget _buildDropZone(bool sending) {
     return Padding(
       padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.xl, vertical: AppSpacing.xs),
+        horizontal: AppSpacing.xl,
+        vertical: AppSpacing.xs,
+      ),
       child: Material(
         color: AppColors.primary.withValues(alpha: 0.045),
         borderRadius: BorderRadius.circular(AppRadii.card),
@@ -215,18 +279,28 @@ class _InboxPageState extends State<InboxPage> {
               padding: EdgeInsets.symmetric(vertical: AppSpacing.xl + 6),
               child: Column(
                 children: [
-                  Icon(Icons.cloud_upload_outlined,
-                      color: AppColors.primary, size: 34),
+                  Icon(
+                    Icons.cloud_upload_outlined,
+                    color: AppColors.primary,
+                    size: 34,
+                  ),
                   SizedBox(height: AppSpacing.xs + 2),
-                  Text('拖文件到这里上传',
-                      style: TextStyle(
-                          color: AppColors.ink,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600)),
+                  Text(
+                    '拖文件到这里上传',
+                    style: TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   SizedBox(height: 2),
-                  Text('支持文本、文件、照片',
-                      style: TextStyle(
-                          color: AppColors.textSecondary, fontSize: 13)),
+                  Text(
+                    '支持文本、文件、照片',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -238,8 +312,9 @@ class _InboxPageState extends State<InboxPage> {
 
   /// 发送条：宽屏四个等高 pill，窄屏两列换行（Android 单列响应式）。
   Widget _buildSendBar(bool sending) {
-    final targets =
-        state.devices.where((d) => d.id != state.currentDeviceId).toList();
+    final targets = state.devices
+        .where((d) => d.id != state.currentDeviceId)
+        .toList();
     final pills = <Widget>[
       _pill(
         key: const Key('targetDeviceDropdown'),
@@ -250,23 +325,27 @@ class _InboxPageState extends State<InboxPage> {
           isExpanded: true,
           isDense: true,
           style: const TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w600),
+            color: AppColors.textPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
           items: [
             const DropdownMenuItem(
-                value: '',
-                child: Text('发送到：所有设备',
-                    overflow: TextOverflow.ellipsis)),
+              value: '',
+              child: Text('发送到：所有设备', overflow: TextOverflow.ellipsis),
+            ),
             for (final d in targets)
               DropdownMenuItem(
                 value: d.id,
-                child: Text('${d.name}${d.online ? ' · 在线' : ' · 离线'}',
-                    overflow: TextOverflow.ellipsis),
+                child: Text(
+                  '${d.name}${d.online ? ' · 在线' : ' · 离线'}',
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
           ],
-          onChanged:
-              sending ? null : (value) => setState(() => _targetDevice = value ?? ''),
+          onChanged: sending
+              ? null
+              : (value) => setState(() => _targetDevice = value ?? ''),
         ),
       ),
       _pillButton(
@@ -332,7 +411,10 @@ class _InboxPageState extends State<InboxPage> {
         border: Border.all(color: AppColors.hairline),
         boxShadow: const [
           BoxShadow(
-              color: Color(0x0D2E5DB2), blurRadius: 8, offset: Offset(0, 2)),
+            color: Color(0x0D2E5DB2),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
         ],
       ),
       child: Row(
@@ -356,19 +438,23 @@ class _InboxPageState extends State<InboxPage> {
       onPressed: onPressed,
       icon: Icon(icon, size: 17),
       label: Text(label, overflow: TextOverflow.ellipsis),
-      style: ElevatedButton.styleFrom(
-        elevation: 0,
-        minimumSize: const Size(0, 48),
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm + 2),
-        backgroundColor: AppColors.surface.withValues(alpha: 0.8),
-        foregroundColor: AppColors.textPrimary,
-        disabledBackgroundColor: AppColors.surface.withValues(alpha: 0.5),
-        side: const BorderSide(color: AppColors.hairline),
-        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-      ).copyWith(
-        // 图标着主蓝、文字保持藏青（对应参考图 pill 蓝图标 + 深色文字）。
-        iconColor: const WidgetStatePropertyAll(AppColors.primary),
-      ),
+      style:
+          ElevatedButton.styleFrom(
+            elevation: 0,
+            minimumSize: const Size(0, 48),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm + 2),
+            backgroundColor: AppColors.surface.withValues(alpha: 0.8),
+            foregroundColor: AppColors.textPrimary,
+            disabledBackgroundColor: AppColors.surface.withValues(alpha: 0.5),
+            side: const BorderSide(color: AppColors.hairline),
+            textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ).copyWith(
+            // 图标着主蓝、文字保持藏青（对应参考图 pill 蓝图标 + 深色文字）。
+            iconColor: const WidgetStatePropertyAll(AppColors.primary),
+          ),
     );
   }
 
@@ -384,8 +470,11 @@ class _InboxPageState extends State<InboxPage> {
             child: ConstrainedBox(
               constraints: BoxConstraints(minHeight: constraints.maxHeight),
               child: const Center(
-                  child: Text('暂无内容',
-                      style: TextStyle(color: AppColors.textSecondary))),
+                child: Text(
+                  '暂无内容',
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
+              ),
             ),
           ),
         ),
@@ -410,9 +499,15 @@ class _InboxPageState extends State<InboxPage> {
   Widget _tileFor(Item item) {
     return ItemTile(
       item: item,
-      leading: item.kind == 'image' ? _ImagePreview(item: item, state: state) : null,
+      leading: item.kind == 'image'
+          ? _ImagePreview(item: item, state: state)
+          : null,
       sourceLabel: state.deviceDisplayName(item.sourceDevice),
       statusText: formatExpiry(item),
+      onEditNote: (note) async {
+        final ok = await state.updateNote(item.id, note);
+        return ok ? null : state.entryError(item.id) ?? '备注保存失败';
+      },
       primaryAction: item.kind == 'text'
           ? IconButton(
               key: Key('copy-${item.id}'),
@@ -431,8 +526,9 @@ class _InboxPageState extends State<InboxPage> {
   }
 
   List<PopupMenuEntry<void>> _menuFor(Item item) {
-    final targets =
-        state.devices.where((d) => d.id != state.currentDeviceId).toList();
+    final targets = state.devices
+        .where((d) => d.id != state.currentDeviceId)
+        .toList();
     return [
       for (final d in targets)
         PopupMenuItem(
@@ -460,13 +556,18 @@ class _InboxPageState extends State<InboxPage> {
       if (widget.bridge != null && item.kind != 'text')
         PopupMenuItem(
           key: Key('revealReceived-${item.id}'),
-          onTap: () => widget.bridge!
-              .filesRevealReceived(deliveryId: item.id, name: item.name),
+          onTap: () => widget.bridge!.filesRevealReceived(
+            deliveryId: item.id,
+            name: item.name,
+          ),
           child: const Text('在 Finder 中显示'),
         ),
       PopupMenuItem(
         onTap: () async {
-          if (await confirmDelete(context, item.text.isNotEmpty ? item.text : item.name)) {
+          if (await confirmDelete(
+            context,
+            item.text.isNotEmpty ? item.text : item.name,
+          )) {
             await state.deleteItemById(item.id);
           }
         },
@@ -507,16 +608,23 @@ class _InboxPageState extends State<InboxPage> {
         final isMine = item.sourceDevice == state.currentDeviceId;
         final saved = isMine
             ? await bridge.filesSaveSent(
-                itemId: item.id, name: item.name, data: bytes)
+                itemId: item.id,
+                name: item.name,
+                data: bytes,
+              )
             : await bridge.filesSaveReceived(
-                deliveryId: item.id, name: item.name, data: bytes);
+                deliveryId: item.id,
+                name: item.name,
+                data: bytes,
+              );
         if (saved.ok) {
           debugPrint('已保存：${saved.value}');
           return;
         }
       }
       final target = File(
-          '${Directory.systemTemp.path}/copysync_${item.id}_${item.name}');
+        '${Directory.systemTemp.path}/copysync_${item.id}_${item.name}',
+      );
       await target.writeAsBytes(bytes);
       debugPrint('已保存到临时目录：${target.path}');
     } on ApiException catch (e) {
@@ -539,7 +647,9 @@ class _DashedBorderPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
     final rrect = RRect.fromRectAndRadius(
-        Offset.zero & size, Radius.circular(radius));
+      Offset.zero & size,
+      Radius.circular(radius),
+    );
     final path = Path()..addRRect(rrect);
     const dashWidth = 6.0;
     const dashGap = 4.0;
@@ -586,8 +696,10 @@ class _ImagePreview extends StatelessWidget {
           return const ColoredBox(
             color: Color(0xFFE3EAF3),
             child: Center(
-              child: Icon(Icons.image_outlined,
-                  key: Key('imagePreviewPlaceholder')),
+              child: Icon(
+                Icons.image_outlined,
+                key: Key('imagePreviewPlaceholder'),
+              ),
             ),
           );
         },

@@ -57,6 +57,14 @@ Future<void> pumpShell(
   await tester.pump();
 }
 
+/// 轮询等待异步操作落地，避免并发测试下固定延时过早断言。
+Future<void> waitUntil(WidgetTester tester, bool Function() condition) async {
+  for (var i = 0; i < 100 && !condition(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    await tester.pump();
+  }
+}
+
 /// 造一个文本 item 并刷新进列表。
 Future<void> seedText(AppState state, String text,
     {String? targetDevice}) async {

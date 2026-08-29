@@ -15,13 +15,16 @@ import 'ui/home_shell.dart';
 import 'ui/login_page.dart';
 import 'ui/theme.dart';
 
+const defaultBaseUrl = String.fromEnvironment(
+  'COPYSYNC_BASE_URL',
+  defaultValue: 'https://copy-direct.example.com',
+);
+
 void main() {
   // restoreSession 会走方法通道读 Keychain，必须先初始化绑定。
   WidgetsFlutterBinding.ensureInitialized();
-  final baseUrl =
-      Platform.isAndroid ? 'http://10.0.2.2:15101' : 'http://127.0.0.1:15101';
   final state = AppState(
-    api: ApiClient(baseUrl),
+    api: ApiClient(defaultBaseUrl),
     tokenStore: SecureTokenStore(),
   );
 
@@ -42,6 +45,7 @@ void main() {
     state.android = androidBridge;
   }
 
+  state.startRealtimeSync();
   state.restoreSession();
   runApp(CopySyncApp(
     state: state,

@@ -4,3 +4,9 @@ __pycache__/
 *.pyc
 mac-clipboard/signing/
 .venv-task26/
+
+# Local/generated artifacts and brainstorming runtime state.
+.superpowers/
+mac-clipboard/build-2.0/
+updates/*.zip
+updates/*.zip.bak-*

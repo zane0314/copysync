@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:copysync/api/api_client.dart';
 import 'package:copysync/bridge/android_bridge_models.dart';
+import 'package:copysync/bridge/bridge_result.dart';
 import 'package:copysync/state/app_state.dart';
 
 import 'fake_android_host.dart';
@@ -87,6 +89,30 @@ void main() {
     await settle();
     expect(android.savedSent, hasLength(1));
     expect(android.savedSent.single['name'], 'copysync_send_test.txt');
+    await tmp.delete();
+  });
+
+  test('发送返回前等待 Android 路径转存，转存失败不改变上传成功', () async {
+    await login();
+    final tmp = File('${Directory.systemTemp.path}/copysync_send_path_test.txt');
+    await tmp.writeAsString('转存内容');
+    final save = Completer<BridgeResult<String>>();
+    android.saveSentCompleter = save;
+    var completed = false;
+    final sending = state.sendFile(tmp.path).then((ok) {
+      completed = true;
+      return ok;
+    });
+    for (var i = 0; i < 50 && android.savedSentPaths.isEmpty; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(android.savedSentPaths, hasLength(1));
+    expect(android.savedSentPaths.single['path'], tmp.path);
+    expect(android.savedSentPaths.single.containsKey('data'), isFalse);
+    expect(completed, isFalse);
+    save.complete(const BridgeResult.failure(
+        errorCode: 'system_error', errorMessage: '保存失败'));
+    expect(await sending, isTrue);
     await tmp.delete();
   });
 

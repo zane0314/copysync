@@ -98,6 +98,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .main { border-radius: var(--radius); padding: 26px 28px 30px; overflow-y: auto; min-width: 0; }
 .view-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
 .view-head h1 { margin: 0 0 6px; font-size: 24px; color: var(--navy); letter-spacing: -.6px; }
+.head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .online-line { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 13px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px rgba(52, 201, 163, .18); }
 .dot.off { background: var(--amber); box-shadow: 0 0 0 3px rgba(217, 147, 13, .15); }

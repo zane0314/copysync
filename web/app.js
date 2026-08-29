@@ -1,5 +1,7 @@
 'use strict';
 /* CopySync 网页客户端：原生 JS，无框架无构建；仅调 /api/v1，Cookie webclip_v1 承载认证。 */
+const BUILD = '20260828d';
+console.log('CopySync build', BUILD);
 
 const $ = id => document.getElementById(id);
 
@@ -19,7 +21,11 @@ const state = {
   events: null,
 };
 
-const DEVICE_NAME = '网页浏览器';
+// Mac 端 app 通过 WKWebView 加载本站并带 ?app=mac；据此把设备登记为 Mac 端，
+// 与网页浏览器区分开（此前两者都以 网页浏览器/web 登录，会合并成同一条设备记录）。
+const IS_MAC_APP = new URLSearchParams(location.search).get('app') === 'mac';
+const DEVICE_NAME = IS_MAC_APP ? 'Mac端' : '网页浏览器';
+const DEVICE_PLATFORM = IS_MAC_APP ? 'mac' : 'web';
 const EXTEND_TTL = 7 * 86400;
 
 /* ---------- 基础工具 ---------- */
@@ -141,7 +147,7 @@ async function login(password) {
   const data = await api('/api/v1/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password, device_name: DEVICE_NAME, platform: 'web', client: 'web' }),
+    body: JSON.stringify({ password, device_name: DEVICE_NAME, platform: DEVICE_PLATFORM, client: 'web' }),
   });
   state.deviceId = data.device.id;
   localStorage.setItem('copysync.deviceId', state.deviceId);
@@ -172,15 +178,24 @@ async function loadDevices() {
   const data = await api('/api/v1/devices');
   state.devices = data.devices || [];
   if (!state.deviceId) {
-    const mine = state.devices.find(d => d.platform === 'web' && d.name === DEVICE_NAME);
-    if (mine) {
-      state.deviceId = mine.id;
-      localStorage.setItem('copysync.deviceId', mine.id);
+    const found = state.devices.find(d => d.platform === DEVICE_PLATFORM && d.name === DEVICE_NAME);
+    if (found) {
+      state.deviceId = found.id;
+      localStorage.setItem('copysync.deviceId', found.id);
     }
   }
   const online = state.devices.filter(d => d.online).length;
   $('onlineCount').textContent = `${online} 台设备在线`;
   const mine = state.devices.find(d => d.id === state.deviceId);
+  // 旧版 Mac app 曾以 网页浏览器/web 登录；升级后一次性纠正为 Mac 端身份。
+  if (IS_MAC_APP && mine && mine.platform !== 'mac') {
+    localStorage.removeItem('copysync.deviceId');
+    state.deviceId = '';
+    await api('/api/v1/auth/logout', { method: 'POST' }).catch(() => {});
+    toast('检测到旧的网页身份，请重新登录一次以标识为 Mac 端');
+    showLogin();
+    return;
+  }
   $('settingsDevice').textContent = mine ? `${mine.name}（${mine.platform}）` : DEVICE_NAME;
   const select = $('targetDevice');
   const previous = select.value;
@@ -302,9 +317,28 @@ function renderInbox() {
   list.innerHTML = rows.length
     ? rows.map(t => transferRowHtml(t, false)).join('')
     : '<div class="empty">这里还没有内容</div>';
-  const waiting = state.deliveries.filter(t => t.status === 'waiting').length;
+  // 未读仅计本端“接收”的等待项（入站）；我发出的（出站）不算未读，不参与“全部已读”
+  const waiting = state.deliveries.filter(t => t.status === 'waiting' && t.target_device === state.deviceId).length;
   $('inboxBadge').hidden = !waiting;
   $('inboxBadge').textContent = waiting;
+  const mb = $('markAllReadBtn');
+  if (mb) { mb.hidden = !waiting; mb.textContent = waiting ? `全部已读（${waiting}）` : '全部已读'; }
+}
+
+async function markAllRead() {
+  // 一键已读：只标记本端“接收”的等待项为已读（入站 ack）；不触碰出站发送的消息
+  const mine = state.deliveries.filter(t => t.status === 'waiting' && t.target_device === state.deviceId);
+  if (!mine.length) { toast('没有未读内容'); return; }
+  const btn = $('markAllReadBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '清理中…'; }
+  let done = 0;
+  for (const t of mine) {
+    await ackDelivery(t, 'delivered');
+    done++;
+  }
+  if (btn) btn.disabled = false;
+  toast(`已标记 ${done} 条已读`);
+  await refreshAll().catch(() => {});
 }
 
 function renderTransfers() {
@@ -316,7 +350,7 @@ function renderTransfers() {
     : '<div class="empty">暂无记录</div>';
 }
 
-const STATUS_LABELS = { waiting: '等待接收', delivered: '已送达', downloaded: '已接收', copied: '已接收', failed: '失败' };
+const STATUS_LABELS = { waiting: '等待接收', delivered: '已送达', downloaded: '已接收', copied: '已接收', failed: '失败', cancelled: '已取消' };
 
 function transferRowHtml(t, expired) {
   const kind = t.kind || (t.text ? 'text' : 'file');
@@ -582,6 +616,17 @@ async function ackDelivery(transfer, status) {
   } catch { /* ack 失败不影响本地复制/下载结果 */ }
 }
 
+async function cancelDelivery(transfer) {
+  if (transfer.source_device !== state.deviceId) return false; // 只能由发送方撤回
+  try {
+    await api(`/api/v1/deliveries/${encodeURIComponent(transfer.id)}/cancel`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': newIdemKey() },
+    });
+    return true;
+  } catch { return false; }
+}
+
 async function openTransfer(transfer) {
   if (!transfer || transfer.expired) return;
   const kind = transfer.kind || (transfer.text ? 'text' : 'file');
@@ -676,7 +721,9 @@ async function uploadDriveFiles(files) {
     for (const file of files) {
       const body = new FormData();
       body.append('file', file);
-      await api('/api/v1/items', { method: 'POST', headers: { 'Idempotency-Key': key + ':' + file.name + ':' + file.size }, body });
+      // Idempotency-Key 是 HTTP 头，只能含 ISO-8859-1 字符；文件名可能有中文（如"截屏….png"），
+      // 直接拼进头会让 fetch 同步抛 TypeError，被 api() 兜成"网络连接失败"。故对文件名做 encodeURIComponent 转成纯 ASCII。
+      await api('/api/v1/items', { method: 'POST', headers: { 'Idempotency-Key': key + ':' + encodeURIComponent(file.name) + ':' + file.size }, body });
     }
     toast(files.length > 1 ? `已上传 ${files.length} 个文件` : '已上传 ' + files[0].name);
     await refreshAll();
@@ -786,7 +833,11 @@ function bindDrop(element, onFiles) {
     element.classList.remove('active');
   }));
   element.addEventListener('drop', e => {
-    if (e.dataTransfer.files.length) onFiles(e.dataTransfer.files);
+    // dataTransfer.files 是与 drop 事件绑定的 live FileList，处理器返回后浏览器会清空它。
+    // 上传是异步的（await fetch），若直接传引用，真正读文件时它已失效 → fetch 报“网络连接失败”。
+    // 这里同步用 Array.from 快照出稳定的 File 引用，picker 走的 input.files 不受影响，行为一致。
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) onFiles(files);
   });
 }
 
@@ -816,6 +867,7 @@ function bindEvents() {
 
   document.querySelectorAll('.nav-item').forEach(b => { b.onclick = () => setView(b.dataset.view); });
   $('refreshBtn').onclick = () => refreshNow($('refreshBtn'));
+  $('markAllReadBtn').onclick = markAllRead;
   $('refreshBtn2').onclick = () => refreshNow($('refreshBtn2'));
   $('netRetry').onclick = () => refreshNow($('netRetry'));
   $('logoutBtn').onclick = logout;

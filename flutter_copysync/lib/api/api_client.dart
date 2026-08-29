@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -259,6 +260,64 @@ class ApiClient {
     );
   }
 
+  /// 读取 `/api/v1/events` 的 SSE 版本通知；取消订阅会关闭底层连接。
+  Stream<int> events() {
+    final controller = StreamController<int>();
+    HttpClient? client;
+    var cancelled = false;
+
+    Future<void> connect() async {
+      client = HttpClient();
+      try {
+        final request = await client!.getUrl(
+          Uri.parse('$baseUrl/api/v1/events'),
+        );
+        if (token != null) {
+          request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        }
+        final response = await request.close();
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          await _decodeResponse(response);
+          throw StateError('unreachable');
+        }
+        var buffer = '';
+        await for (final chunk in response.transform(utf8.decoder)) {
+          if (cancelled) break;
+          buffer += chunk;
+          var end = buffer.indexOf('\n\n');
+          while (end >= 0) {
+            final frame = buffer.substring(0, end);
+            buffer = buffer.substring(end + 2);
+            for (final line in frame.split('\n')) {
+              if (!line.startsWith('data:')) continue;
+              final version = int.tryParse(line.substring(5).trim());
+              if (version != null && !cancelled) controller.add(version);
+            }
+            end = buffer.indexOf('\n\n');
+          }
+        }
+        if (!cancelled) await controller.close();
+      } catch (error, stack) {
+        if (!cancelled) {
+          controller.addError(_networkException(error), stack);
+          await controller.close();
+        }
+      } finally {
+        client?.close(force: true);
+        client = null;
+      }
+    }
+
+    controller.onListen = () {
+      unawaited(connect());
+    };
+    controller.onCancel = () {
+      cancelled = true;
+      client?.close(force: true);
+    };
+    return controller.stream;
+  }
+
   Future<Item> getItem(String id) async {
     final body = await _request('GET', '/api/v1/items/$id');
     return Item.fromJson(body['item'] as Map<String, Object?>);
@@ -286,9 +345,16 @@ class ApiClient {
     return Item.fromJson(body['item'] as Map<String, Object?>);
   }
 
+  /// 客户端上传上限（与服务端 MAX_FILE_BYTES=100MB 对齐），提前拦截避免
+  /// 服务端提前 413 关连接导致 "connection closed before full header"。
+  static const int maxUploadBytes = 100 * 1024 * 1024;
+
   /// 上传文件/图片（multipart/form-data）；图片可同时带 clipboard_variant。
   /// [path] 为本地文件路径，文件名取路径最后一段；MIME 按扩展名推断，
   /// 服务端按 MIME 决定 kind（image/* → image，否则 file）。
+  ///
+  /// 主文件以 openRead() 流式发送，不整块读入内存——避免大文件 readAsBytes()
+  /// 导致的 OOM 强退（从"选择文件"选大文件上传屡次崩溃的根因）。
   Future<Item> uploadFile(
     String path, {
     String? clipboardVariantPath,
@@ -297,29 +363,54 @@ class ApiClient {
     String? note,
   }) async {
     final file = File(path);
-    final bytes = await file.readAsBytes();
+    final fileLength = await file.length();
+    if (fileLength > maxUploadBytes) {
+      throw ApiException(413, 'file_too_large', '文件超过 100MB 上限，无法上传');
+    }
     final name = _basename(path);
-    List<int>? variantBytes;
+    // variant 与主文件一样流式发送，避免图片副本整块读入内存。
+    final variantFile = clipboardVariantPath != null &&
+            clipboardVariantPath.isNotEmpty
+        ? File(clipboardVariantPath)
+        : null;
+    final variantLength = variantFile == null ? 0 : await variantFile.length();
     String? variantName;
-    if (clipboardVariantPath != null && clipboardVariantPath.isNotEmpty) {
-      variantBytes = await File(clipboardVariantPath).readAsBytes();
-      variantName = _basename(clipboardVariantPath);
+    if (variantFile != null) {
+      variantName = _basename(variantFile.path);
     }
     final boundary =
         '----copysync${DateTime.now().microsecondsSinceEpoch}${_boundaryRandom.nextInt(1 << 32)}';
-    final body = _encodeMultipart(
-      boundary,
-      fields: {
-        if (note != null && note.isNotEmpty) 'note': note,
-        if (targetDevice != null && targetDevice.isNotEmpty)
-          'target_device': targetDevice,
-      },
-      files: [
-        (name: 'file', filename: name, bytes: bytes),
-        if (variantBytes != null)
-          (name: 'clipboard_variant', filename: variantName!, bytes: variantBytes),
-      ],
-    );
+
+    // 头部：表单字段 + 主文件分段头（截止到文件内容前的空行）。
+    final head = BytesBuilder();
+    final fields = <String, String>{
+      if (note != null && note.isNotEmpty) 'note': note,
+      if (targetDevice != null && targetDevice.isNotEmpty)
+        'target_device': targetDevice,
+    };
+    for (final entry in fields.entries) {
+      head.add(utf8.encode('--$boundary\r\n'
+          'Content-Disposition: form-data; name="${entry.key}"\r\n'
+          '\r\n'
+          '${entry.value}\r\n'));
+    }
+    head.add(utf8.encode('--$boundary\r\n'
+        'Content-Disposition: form-data; name="file"; filename="$name"\r\n'
+        'Content-Type: ${_mimeOf(name)}\r\n'
+        '\r\n'));
+    final headBytes = head.toBytes();
+
+    // 主文件后的分段头；variant 内容单独 openRead()，最后再写结束边界。
+    final variantHead = BytesBuilder();
+    if (variantFile != null) {
+      variantHead.add(utf8.encode('--$boundary\r\n'
+          'Content-Disposition: form-data; name="clipboard_variant"; filename="$variantName"\r\n'
+          'Content-Type: ${_mimeOf(variantName!)}\r\n'
+          '\r\n'));
+    }
+    final variantHeadBytes = variantHead.toBytes();
+    final tailBytes = utf8.encode('--$boundary--\r\n');
+
     final client = HttpClient();
     try {
       final request = await client.openUrl(
@@ -333,8 +424,22 @@ class ApiClient {
       request.headers.contentType = ContentType('multipart', 'form-data',
           parameters: {'boundary': boundary});
       // Python http.server 不支持 chunked 请求体，必须显式 Content-Length。
-      request.contentLength = body.length;
-      request.add(body);
+      request.contentLength = headBytes.length +
+          fileLength +
+          2 +
+          (variantFile == null
+              ? 0
+              : variantHeadBytes.length + variantLength + 2) +
+          tailBytes.length;
+      request.add(headBytes);
+      await request.addStream(file.openRead());
+      request.add(utf8.encode('\r\n'));
+      if (variantFile != null) {
+        request.add(variantHeadBytes);
+        await request.addStream(variantFile.openRead());
+        request.add(utf8.encode('\r\n'));
+      }
+      request.add(tailBytes);
       final response = await request.close();
       final decoded = await _decodeResponse(response);
       return Item.fromJson(decoded['item'] as Map<String, Object?>);
@@ -400,6 +505,22 @@ class ApiClient {
       headers: {
         if (idemKey != null && idemKey.isNotEmpty) 'Idempotency-Key': idemKey,
       },
+      // 幂等操作：对传输层瞬时错误重试一次，缓解偶发的 header 前连接重置。
+      retryOnNetworkError: 1,
+    );
+  }
+
+  /// 清理未固定的临时内容，返回 {"deleted","bytes"}。
+  Future<Map<String, Object?>> clearTemp({String? idemKey}) async {
+    return _request(
+      'POST',
+      '/api/v1/items/clear-temp',
+      jsonBody: const {},
+      headers: {
+        if (idemKey != null && idemKey.isNotEmpty) 'Idempotency-Key': idemKey,
+      },
+      // 幂等操作：对传输层瞬时错误重试一次，缓解偶发的 header 前连接重置。
+      retryOnNetworkError: 1,
     );
   }
 
@@ -509,64 +630,77 @@ class ApiClient {
     return mimes[ext] ?? 'application/octet-stream';
   }
 
-  static Uint8List _encodeMultipart(
-    String boundary, {
-    Map<String, String> fields = const {},
-    List<({String name, String filename, List<int> bytes})> files = const [],
-  }) {
-    final builder = BytesBuilder();
-    for (final entry in fields.entries) {
-      builder.add(utf8.encode('--$boundary\r\n'
-          'Content-Disposition: form-data; name="${entry.key}"\r\n'
-          '\r\n'
-          '${entry.value}\r\n'));
-    }
-    for (final file in files) {
-      builder.add(utf8.encode('--$boundary\r\n'
-          'Content-Disposition: form-data; name="${file.name}"; filename="${file.filename}"\r\n'
-          'Content-Type: ${_mimeOf(file.filename)}\r\n'
-          '\r\n'));
-      builder.add(file.bytes);
-      builder.add(utf8.encode('\r\n'));
-    }
-    builder.add(utf8.encode('--$boundary--\r\n'));
-    return builder.toBytes();
-  }
-
+  /// [retryOnNetworkError] 仅供幂等操作（携带 Idempotency-Key 或天然幂等）使用：
+  /// 遇传输层瞬时错误（SocketException/HttpException/OSError，如 header 前连接重置）时，
+  /// 复用同一请求头（含同一 Idempotency-Key）重试，服务端命中幂等键返回缓存结果，保证恰好一次。
+  /// 不重试 HTTP 错误响应（那些经 _decodeResponse 抛 ApiException，不属传输层错误）。
   Future<Map<String, Object?>> _request(
     String method,
     String path, {
     Map<String, Object?>? jsonBody,
     Map<String, String>? headers,
     bool authenticated = true,
+    int retryOnNetworkError = 0,
   }) async {
-    final client = HttpClient();
-    try {
-      final request = await client.openUrl(method, Uri.parse('$baseUrl$path'));
-      if (authenticated && token != null) {
-        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+    var attemptsLeft = retryOnNetworkError;
+    while (true) {
+      final client = HttpClient();
+      try {
+        final request = await client.openUrl(method, Uri.parse('$baseUrl$path'));
+        if (authenticated && token != null) {
+          request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        }
+        headers?.forEach(request.headers.set);
+        if (jsonBody != null) {
+          request.headers.contentType = ContentType.json;
+          final encoded = utf8.encode(jsonEncode(jsonBody));
+          // Python http.server 不支持 chunked 请求体，必须显式 Content-Length。
+          request.contentLength = encoded.length;
+          request.add(encoded);
+        }
+        final response = await request.close();
+        return await _decodeResponse(response);
+      } on SocketException catch (e) {
+        if (attemptsLeft > 0) {
+          attemptsLeft -= 1;
+          await Future<void>.delayed(_retryDelay);
+          continue;
+        }
+        throw ApiException(0, 'network_error', '无法连接服务器：${e.message}');
+      } on HttpException catch (e) {
+        if (attemptsLeft > 0) {
+          attemptsLeft -= 1;
+          await Future<void>.delayed(_retryDelay);
+          continue;
+        }
+        throw ApiException(0, 'network_error', '网络错误：${e.message}');
+      } on OSError catch (e) {
+        // connect 阶段的对端重置等底层错误（不经 SocketException 包装）。
+        if (attemptsLeft > 0) {
+          attemptsLeft -= 1;
+          await Future<void>.delayed(_retryDelay);
+          continue;
+        }
+        throw ApiException(0, 'network_error', '网络错误：${e.message}');
+      } finally {
+        client.close();
       }
-      headers?.forEach(request.headers.set);
-      if (jsonBody != null) {
-        request.headers.contentType = ContentType.json;
-        final encoded = utf8.encode(jsonEncode(jsonBody));
-        // Python http.server 不支持 chunked 请求体，必须显式 Content-Length。
-        request.contentLength = encoded.length;
-        request.add(encoded);
-      }
-      final response = await request.close();
-      return await _decodeResponse(response);
-    } on SocketException catch (e) {
-      throw ApiException(0, 'network_error', '无法连接服务器：${e.message}');
-    } on HttpException catch (e) {
-      throw ApiException(0, 'network_error', '网络错误：${e.message}');
-    } on OSError catch (e) {
-      // connect 阶段的对端重置等底层错误（不经 SocketException 包装）。
-      throw ApiException(0, 'network_error', '网络错误：${e.message}');
-    } finally {
-      client.close();
     }
   }
+
+  static const Duration _retryDelay = Duration(milliseconds: 150);
+
+  ApiException _networkException(Object error) => switch (error) {
+    ApiException e => e,
+    SocketException e => ApiException(
+      0,
+      'network_error',
+      '无法连接服务器：${e.message}',
+    ),
+    HttpException e => ApiException(0, 'network_error', '网络错误：${e.message}'),
+    OSError e => ApiException(0, 'network_error', '网络错误：${e.message}'),
+    _ => ApiException(0, 'network_error', '网络错误：$error'),
+  };
 
   /// 读取响应：2xx 解析 JSON map；否则把错误信封映射为 ApiException。
   Future<Map<String, Object?>> _decodeResponse(HttpClientResponse response) async {

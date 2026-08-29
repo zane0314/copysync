@@ -220,7 +220,7 @@ def init():
                 conn.execute(f"alter table items add column {name} {definition}")
         now = int(time.time())
         for device_id, name, platform in (
-            ("mac", "Mac", "mac"),
+            ("mac", "Mac端", "mac"),
             ("android", "Android 手机", "android"),
             ("web", "网页临时设备", "web"),
         ):
@@ -228,7 +228,7 @@ def init():
                 "insert into devices(id,name,platform,last_seen_at) values(?,?,?,?) on conflict(id) do nothing",
                 (device_id, name, platform, now if device_id == "web" else 0),
             )
-        conn.execute("update devices set name='Mac', enabled=1 where id='mac'")
+        conn.execute("update devices set name='Mac端', enabled=1 where id='mac'")
         conn.execute("delete from devices where id='windows'")
         if not get_setting(conn, "password_hash"):
             if not PASSWORD_HASH and not PASSWORD:
@@ -862,6 +862,8 @@ class Handler(BaseHTTPRequestHandler):
             rest = urllib.parse.unquote(path[len("/api/v1/deliveries/"):])
             if rest.endswith("/ack") and method == "POST":
                 return self.v1_ack_delivery(rest[:-len("/ack")])
+            if rest.endswith("/cancel") and method == "POST":
+                return self.v1_cancel_delivery(rest[:-len("/cancel")])
         if path == "/api/v1/events" and method == "GET":
             return self.v1_events()
         if path.startswith("/api/v1/devices/"):
@@ -1503,6 +1505,31 @@ class Handler(BaseHTTPRequestHandler):
             if target and target["platform"] == "android" and status == "delivered":
                 status = "waiting"  # android 需手动接收，delivered 降级为 waiting
             conn.execute("update deliveries set status=?, updated_at=? where id=?", (status, int(time.time()), delivery_id))
+            record_change(conn, "delivery", delivery_id, "upsert")
+            row = conn.execute("select * from deliveries where id=?", (delivery_id,)).fetchone()
+            result = {"delivery": dict(row)}
+            if idem_key:
+                idem_store(conn, device["id"], idem_key, result)
+        notify_items_changed()
+        self.send_json(result)
+
+    def v1_cancel_delivery(self, delivery_id):
+        # 发送方撤回自己发出、对方还没接收的等待项（收件箱「全部已读」清理出站项用）。
+        # 只允许 source_device==本机 撤回；置为 cancelled 后会从对方待接收队列消失并被归档。
+        device = self.require_v1_device()
+        idem_key = self.headers.get("idempotency-key", "").strip()
+        with db() as conn:
+            if idem_key:
+                cached = idem_replay(conn, device["id"], idem_key)
+                if cached is not None:
+                    self.send_json(cached, headers={"X-Idempotent-Replay": "1"})
+                    return
+            delivery = conn.execute("select * from deliveries where id=?", (delivery_id,)).fetchone()
+            if not delivery:
+                self.api_fail(404, "delivery_not_found", "投递不存在")
+            if delivery["source_device"] != device["id"]:
+                self.api_fail(403, "device_mismatch", "只能由发送方撤回")
+            conn.execute("update deliveries set status=?, updated_at=? where id=?", ("cancelled", int(time.time()), delivery_id))
             record_change(conn, "delivery", delivery_id, "upsert")
             row = conn.execute("select * from deliveries where id=?", (delivery_id,)).fetchone()
             result = {"delivery": dict(row)}

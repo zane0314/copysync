@@ -11,20 +11,29 @@ abstract class AndroidHost {
   Stream<BridgeEvent> get events;
 
   // clipboard
-  Future<BridgeResult<void>> clipboardWrite(
-      {String? text, Uint8List? png, bool ignoreNext = false});
+  Future<BridgeResult<void>> clipboardWrite({
+    String? text,
+    Uint8List? png,
+    bool ignoreNext = false,
+  });
 
   // background（前台服务保活）
   Future<BridgeResult<void>> backgroundStart({String mode});
   Future<BridgeResult<void>> backgroundStop();
 
   // notify
-  Future<BridgeResult<void>> notifyShow(
-      {required String title, required String body, String? id});
+  Future<BridgeResult<void>> notifyShow({
+    required String title,
+    required String body,
+    String? id,
+  });
 
   // share
   Future<BridgeResult<List<AndroidSharePayload>>> sharePending();
   Future<BridgeResult<void>> shareConfirm(List<String> ids);
+
+  // picker（Android 原生 SAF，返回应用缓存路径而非文件字节）
+  Future<BridgeResult<AndroidPickedFile?>> pickFile({bool imagesOnly = false});
 
   // download（DownloadManager 入队 + 重启对账）
   Future<BridgeResult<int>> downloadEnqueue({
@@ -40,7 +49,7 @@ abstract class AndroidHost {
   Future<BridgeResult<String>> filesSaveSent({
     required String itemId,
     required String name,
-    required Uint8List data,
+    required String path,
   });
   Future<BridgeResult<void>> filesOpenReceived({
     String? deliveryId,

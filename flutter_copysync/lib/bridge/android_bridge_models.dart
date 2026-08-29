@@ -1,8 +1,36 @@
 /// Android 桥接的数据模型，字段与原生侧（Kotlin）返回的 map 一一对应。
 library;
 
-/// 分享进来的单个文件/图片：原生侧已把内容复制到应用缓存目录，
-/// [path] 可直接读取上传，`share.confirm` 后由原生侧清理。
+/// Android 原生文件选择结果：只返回应用缓存路径和元数据，避免
+/// MethodChannel 把完整文件内容复制到 Dart 内存。
+class AndroidPickedFile {
+  const AndroidPickedFile({
+    required this.name,
+    required this.mime,
+    required this.path,
+    required this.size,
+  });
+
+  factory AndroidPickedFile.fromMap(Map<Object?, Object?> map) {
+    return AndroidPickedFile(
+      name: map['name'] as String? ?? '',
+      mime: map['mime'] as String? ?? 'application/octet-stream',
+      path: map['path'] as String? ?? '',
+      size: (map['size'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  final String name;
+  final String mime;
+  final String path;
+  final int size;
+
+  @override
+  String toString() => 'AndroidPickedFile($name, $mime, $size)';
+}
+
+/// 分享进来的单个文件/图片：原生侧已把内容复制到应用缓存目录、
+/// [path] 可直接读取上传，确认后由原生侧清理。
 class AndroidSharedFile {
   const AndroidSharedFile({
     required this.name,
@@ -31,7 +59,11 @@ class AndroidSharedFile {
 
 /// 一次分享（ACTION_SEND / SEND_MULTIPLE）的待确认载荷。
 class AndroidSharePayload {
-  const AndroidSharePayload({required this.id, this.text, this.files = const []});
+  const AndroidSharePayload({
+    required this.id,
+    this.text,
+    this.files = const [],
+  });
 
   factory AndroidSharePayload.fromMap(Map<Object?, Object?> map) {
     return AndroidSharePayload(
@@ -48,7 +80,8 @@ class AndroidSharePayload {
   final List<AndroidSharedFile> files;
 
   @override
-  String toString() => 'AndroidSharePayload($id, text=$text, ${files.length} files)';
+  String toString() =>
+      'AndroidSharePayload($id, text=$text, ${files.length} files)';
 }
 
 /// 下载对账状态（迁移自旧工程 localFileState/reconcilePendingDownloads 语义）。
@@ -64,7 +97,8 @@ class AndroidDownloadRecord {
 
   factory AndroidDownloadRecord.fromMap(Map<Object?, Object?> map) {
     final raw = map['state'] as String? ?? 'missing';
-    final state = AndroidDownloadState.values.asNameMap()[raw] ??
+    final state =
+        AndroidDownloadState.values.asNameMap()[raw] ??
         AndroidDownloadState.missing;
     return AndroidDownloadRecord(
       deliveryId: map['deliveryId'] as String? ?? '',

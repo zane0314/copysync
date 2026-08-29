@@ -50,6 +50,7 @@ class ItemTile extends StatelessWidget {
     this.statusText,
     this.primaryAction,
     this.menuItems,
+    this.onEditNote,
   });
 
   final Item item;
@@ -69,10 +70,22 @@ class ItemTile extends StatelessWidget {
   /// 更多菜单项；空则不显示菜单按钮。
   final List<PopupMenuEntry<void>>? menuItems;
 
+  /// 返回 null 表示保存成功，否则返回可显示的失败原因。
+  final Future<String?> Function(String note)? onEditNote;
+
   String get title => item.kind == 'text' ? item.text : item.name;
 
   @override
   Widget build(BuildContext context) {
+    final entries = <PopupMenuEntry<void>>[
+      if (onEditNote != null)
+        PopupMenuItem<void>(
+          key: Key('editNote-${item.id}'),
+          onTap: () => editItemNote(context, item, onEditNote!),
+          child: const Text('备注'),
+        ),
+      ...?menuItems,
+    ];
     // 参考图行样式：透明底、行间由页面级 hairline 分隔，操作区不被挤出。
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm + 2),
@@ -122,13 +135,13 @@ class ItemTile extends StatelessWidget {
             ],
           ),
           ?primaryAction,
-          if (menuItems case final items? when items.isNotEmpty)
+          if (entries.isNotEmpty)
             PopupMenuButton<void>(
               key: Key('more-${item.id}'),
               icon: const Icon(Icons.more_horiz,
                   color: AppColors.textSecondary),
               tooltip: '更多',
-              itemBuilder: (context) => items,
+              itemBuilder: (context) => entries,
             ),
         ],
       ),
@@ -149,6 +162,106 @@ class ItemTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.tile),
       ),
       child: Icon(icon, color: color, size: 20),
+    );
+  }
+}
+
+/// 条目备注编辑：保持菜单/对话框模式，并在对话框内显示保存中与失败重试。
+Future<void> editItemNote(
+  BuildContext context,
+  Item item,
+  Future<String?> Function(String note) save,
+) async {
+  final saved = await showDialog<bool>(
+    context: context,
+    builder: (_) => _NoteDialog(item: item, save: save),
+  );
+  if (saved == true && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('备注已保存')),
+    );
+  }
+}
+
+class _NoteDialog extends StatefulWidget {
+  const _NoteDialog({required this.item, required this.save});
+
+  final Item item;
+  final Future<String?> Function(String note) save;
+
+  @override
+  State<_NoteDialog> createState() => _NoteDialogState();
+}
+
+class _NoteDialogState extends State<_NoteDialog> {
+  late final TextEditingController _controller;
+  var _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.item.note);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final message = await widget.save(_controller.text.trim());
+    if (!mounted) return;
+    if (message == null) {
+      Navigator.of(context).pop(true);
+    } else {
+      setState(() {
+        _saving = false;
+        _error = message;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: Key('noteDialog-${widget.item.id}'),
+      title: const Text('编辑备注'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            key: Key('noteField-${widget.item.id}'),
+            controller: _controller,
+            maxLength: 200,
+            autofocus: true,
+            decoration: const InputDecoration(hintText: '备注（200 字以内）'),
+          ),
+          if (_error != null)
+            Text(_error!,
+                key: Key('noteError-${widget.item.id}'),
+                style: const TextStyle(color: AppColors.danger)),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed:
+              _saving ? null : () => Navigator.of(context).pop(false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: Key('saveNote-${widget.item.id}'),
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? '保存中…' : '保存'),
+        ),
+      ],
     );
   }
 }

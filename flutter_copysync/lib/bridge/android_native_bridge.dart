@@ -14,11 +14,11 @@ import 'update_checker.dart';
 /// [BridgeResult.errorCode] 映射，MissingPluginException 映射为
 /// [BridgeErrorCodes.unavailable]）。
 ///
-/// 注意：`picker.files/photos` 不在此桥内——文件/图片选择已由
-/// file_selector 插件覆盖（Android 走 SAF），属 delegated-to-plugin。
+/// Android 文件/图片选择走原生 SAF，并只把缓存路径交给 Dart；
+/// macOS 等其他平台仍由 file_selector 插件处理。
 class AndroidNativeBridge implements UpdateChecker, AndroidHost {
   AndroidNativeBridge({MethodChannel? channel})
-      : _channel = channel ?? const MethodChannel(_channelName) {
+    : _channel = channel ?? const MethodChannel(_channelName) {
     _channel.setMethodCallHandler(_onNativeEvent);
   }
 
@@ -34,7 +34,9 @@ class AndroidNativeBridge implements UpdateChecker, AndroidHost {
 
   /// 原生侧反向调用统一视为事件（不做请求/应答）。
   Future<void> _onNativeEvent(MethodCall call) async {
-    if (!_events.isClosed) _events.add(BridgeEvent(call.method, call.arguments));
+    if (!_events.isClosed) {
+      _events.add(BridgeEvent(call.method, call.arguments));
+    }
   }
 
   Future<BridgeResult<T>> _invoke<T>(
@@ -47,12 +49,14 @@ class AndroidNativeBridge implements UpdateChecker, AndroidHost {
       return BridgeResult.success(parse != null ? parse(raw) : raw as T?);
     } on PlatformException catch (e) {
       return BridgeResult.failure(
-          errorCode: e.code,
-          errorMessage: e.message ?? '原生错误（${e.code}）');
+        errorCode: e.code,
+        errorMessage: e.message ?? '原生错误（${e.code}）',
+      );
     } on MissingPluginException {
       return const BridgeResult.failure(
-          errorCode: BridgeErrorCodes.unavailable,
-          errorMessage: '原生桥接未注册');
+        errorCode: BridgeErrorCodes.unavailable,
+        errorMessage: '原生桥接未注册',
+      );
     }
   }
 
@@ -72,8 +76,11 @@ class AndroidNativeBridge implements UpdateChecker, AndroidHost {
   /// 写入剪贴板（text 与 png 二选一）；[ignoreNext] 仅透传，
   /// Android 侧无原生 watcher，去重由 Dart 同步循环负责。
   @override
-  Future<BridgeResult<void>> clipboardWrite(
-      {String? text, Uint8List? png, bool ignoreNext = false}) {
+  Future<BridgeResult<void>> clipboardWrite({
+    String? text,
+    Uint8List? png,
+    bool ignoreNext = false,
+  }) {
     Map<String, Object?>? args;
     if (text != null) {
       args = {'kind': 'text', 'text': text, 'ignoreNext': ignoreNext};
@@ -85,9 +92,12 @@ class AndroidNativeBridge implements UpdateChecker, AndroidHost {
       };
     }
     if (args == null) {
-      return Future.value(const BridgeResult.failure(
+      return Future.value(
+        const BridgeResult.failure(
           errorCode: BridgeErrorCodes.invalidArgs,
-          errorMessage: 'clipboardWrite 需要 text 或 png'));
+          errorMessage: 'clipboardWrite 需要 text 或 png',
+        ),
+      );
     }
     return _invoke('clipboard.write', args);
   }
@@ -106,26 +116,44 @@ class AndroidNativeBridge implements UpdateChecker, AndroidHost {
   // ---------------------------------------------------------------- notify
 
   @override
-  Future<BridgeResult<void>> notifyShow(
-          {required String title, required String body, String? id}) =>
-      _invoke('notify.show', {'title': title, 'body': body, 'id': ?id});
+  Future<BridgeResult<void>> notifyShow({
+    required String title,
+    required String body,
+    String? id,
+  }) => _invoke('notify.show', {'title': title, 'body': body, 'id': ?id});
 
   // ----------------------------------------------------------------- share
 
   /// 拉取所有待确认分享（ACTION_SEND / SEND_MULTIPLE 由原生侧缓存，
   /// 文件已复制到应用缓存目录）。
   @override
-  Future<BridgeResult<List<AndroidSharePayload>>> sharePending() =>
-      _invoke('share.pending', null, (raw) =>
-          (raw as List<Object?>? ?? const [])
-              .map((e) =>
-                  AndroidSharePayload.fromMap(e as Map<Object?, Object?>))
-              .toList());
+  Future<BridgeResult<List<AndroidSharePayload>>> sharePending() => _invoke(
+    'share.pending',
+    null,
+    (raw) => (raw as List<Object?>? ?? const [])
+        .map((e) => AndroidSharePayload.fromMap(e as Map<Object?, Object?>))
+        .toList(),
+  );
 
   /// 确认（发送完成或放弃）后调用，原生侧删除缓存文件与记录。
   @override
   Future<BridgeResult<void>> shareConfirm(List<String> ids) =>
       _invoke('share.confirm', {'ids': ids});
+
+  // ------------------------------------------------------------------ picker
+
+  /// 打开 Android SAF 选择器；原生侧流式复制到缓存目录，避免大文件
+  /// 经 MethodChannel 以 Uint8List 解码。
+  @override
+  Future<BridgeResult<AndroidPickedFile?>> pickFile({
+    bool imagesOnly = false,
+  }) => _invoke(
+    'picker.openFile',
+    {'imagesOnly': imagesOnly},
+    (raw) => raw == null
+        ? null
+        : AndroidPickedFile.fromMap((raw as Map).cast<Object?, Object?>()),
+  );
 
   // -------------------------------------------------------------- download
 
@@ -138,83 +166,93 @@ class AndroidNativeBridge implements UpdateChecker, AndroidHost {
     required String name,
     required String mime,
     Map<String, String>? headers,
-  }) =>
-      _invoke(
-          'download.enqueue',
-          {
-            'url': url,
-            'deliveryId': deliveryId,
-            'name': name,
-            'mime': mime,
-            'headers': ?headers,
-          },
-          (raw) => (raw as num?)?.toInt() ?? -1);
+  }) => _invoke('download.enqueue', {
+    'url': url,
+    'deliveryId': deliveryId,
+    'name': name,
+    'mime': mime,
+    'headers': ?headers,
+  }, (raw) => (raw as num?)?.toInt() ?? -1);
 
   /// 对账所有未完成下载（重启恢复语义）：返回每条 delivery 的
   /// ready/pending/failed/missing 状态。
   @override
   Future<BridgeResult<List<AndroidDownloadRecord>>> downloadReconcile() =>
-      _invoke('download.reconcile', null, (raw) =>
-          (raw as List<Object?>? ?? const [])
-              .map((e) =>
-                  AndroidDownloadRecord.fromMap(e as Map<Object?, Object?>))
-              .toList());
+      _invoke(
+        'download.reconcile',
+        null,
+        (raw) => (raw as List<Object?>? ?? const [])
+            .map(
+              (e) => AndroidDownloadRecord.fromMap(e as Map<Object?, Object?>),
+            )
+            .toList(),
+      );
 
   // ----------------------------------------------------------------- files
 
-  /// 已发送文件落盘 Download/CopySync，返回最终文件名。
+  /// 已发送文件按路径流式落盘 Download/CopySync，返回最终文件名。
   @override
-  Future<BridgeResult<String>> filesSaveSent(
-          {required String itemId,
-          required String name,
-          required Uint8List data}) =>
-      _invoke(
-          'files.saveSent',
-          {'itemId': itemId, 'name': name, 'dataBase64': base64Encode(data)},
-          (raw) => raw as String? ?? '');
+  Future<BridgeResult<String>> filesSaveSent({
+    required String itemId,
+    required String name,
+    required String path,
+  }) => _invoke(
+    'files.saveSent',
+    {'itemId': itemId, 'name': name, 'path': path},
+    (raw) => raw as String? ?? '',
+  );
 
   /// 已接收文件落盘 Download/CopySync，返回最终文件名。
-  Future<BridgeResult<String>> filesSaveReceived(
-          {required String deliveryId,
-          required String name,
-          required Uint8List data}) =>
-      _invoke(
-          'files.saveReceived',
-          {
-            'deliveryId': deliveryId,
-            'name': name,
-            'dataBase64': base64Encode(data),
-          },
-          (raw) => raw as String? ?? '');
+  Future<BridgeResult<String>> filesSaveReceived({
+    required String deliveryId,
+    required String name,
+    required Uint8List data,
+  }) => _invoke('files.saveReceived', {
+    'deliveryId': deliveryId,
+    'name': name,
+    'dataBase64': base64Encode(data),
+  }, (raw) => raw as String? ?? '');
 
   /// 在系统文件管理器中定位接收文件（旧工程 revealReceivedFile 语义）。
-  Future<BridgeResult<String>> filesRevealReceived(
-          {String? deliveryId, required String name}) =>
-      _invoke('files.revealReceived', {'name': name, 'deliveryId': ?deliveryId},
-          (raw) => raw as String? ?? '');
+  Future<BridgeResult<String>> filesRevealReceived({
+    String? deliveryId,
+    required String name,
+  }) => _invoke('files.revealReceived', {
+    'name': name,
+    'deliveryId': ?deliveryId,
+  }, (raw) => raw as String? ?? '');
 
   /// 调用系统查看器打开接收文件（旧工程 viewReceivedFile 语义）。
   @override
-  Future<BridgeResult<void>> filesOpenReceived(
-          {String? deliveryId, required String name, required String mime}) =>
-      _invoke('files.openReceived',
-          {'name': name, 'deliveryId': ?deliveryId, 'mime': mime});
+  Future<BridgeResult<void>> filesOpenReceived({
+    String? deliveryId,
+    required String name,
+    required String mime,
+  }) => _invoke('files.openReceived', {
+    'name': name,
+    'deliveryId': ?deliveryId,
+    'mime': mime,
+  });
 
   // ---------------------------------------------------------------- update
 
   /// 检查更新清单（旧工程 checkForUpdate：versionCode 比较）。
   @override
   Future<BridgeResult<UpdateInfo>> updateCheck(String manifestUrl) => _invoke(
-      'update.check',
-      {'url': manifestUrl},
-      (raw) => UpdateInfo.fromMap(raw as Map<Object?, Object?>? ?? const {}));
+    'update.check',
+    {'url': manifestUrl},
+    (raw) => UpdateInfo.fromMap(raw as Map<Object?, Object?>? ?? const {}),
+  );
 
   /// 下载 APK 并做 SHA-256 校验，成功返回落盘路径。
   @override
-  Future<BridgeResult<String>> updateDownload(
-          {required String url, required String sha256}) =>
-      _invoke('update.download', {'url': url, 'sha256': sha256},
-          (raw) => raw as String? ?? '');
+  Future<BridgeResult<String>> updateDownload({
+    required String url,
+    required String sha256,
+  }) => _invoke('update.download', {
+    'url': url,
+    'sha256': sha256,
+  }, (raw) => raw as String? ?? '');
 
   /// 发起安装（FileProvider 授权 + ACTION_VIEW APK）；
   /// 未允许未知来源时原生侧打开对应设置页并返回 permission_denied。

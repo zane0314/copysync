@@ -128,6 +128,10 @@ class HistoryPage extends StatelessWidget {
             direction,
             if (_statusLabels[status] != null) _statusLabels[status]!,
           ].join(' · '),
+          onEditNote: (note) async {
+            final ok = await state.updateNote(item.id, note);
+            return ok ? null : state.entryError(item.id) ?? '备注保存失败';
+          },
           primaryAction: ackable
               ? IconButton(
                   key: Key('ack-${delivery.id}'),

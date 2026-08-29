@@ -158,8 +158,8 @@ void main() {
       await tester.enterText(
           find.byKey(const Key('newPasswordField')), 'new-password-456');
       await tester.tap(find.byKey(const Key('confirmPasswordButton')));
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      await tester.pump();
+      await waitUntil(tester, () =>
+          server.password == 'new-password-456' && !state.isLoggedIn);
       expect(server.password, 'new-password-456');
       expect(find.byKey(const Key('loginButton')), findsOneWidget);
     });
@@ -178,8 +178,7 @@ void main() {
       await tester.enterText(
           find.byKey(const Key('newPasswordField')), 'new-password-456');
       await tester.tap(find.byKey(const Key('confirmPasswordButton')));
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      await tester.pump();
+      await waitUntil(tester, () => state.passwordStatus == OpStatus.error);
       expect(server.password, 'dev-pw-123');
       expect(state.isLoggedIn, isTrue);
       expect(find.textContaining('当前密码错误'), findsOneWidget);
@@ -213,6 +212,57 @@ void main() {
       expect(server.itemsById, isEmpty);
       expect(state.items, isEmpty);
       expect(find.textContaining('已清空'), findsOneWidget);
+    });
+  });
+
+  testWidgets('清理临时内容二次确认，保留图钉并显示成功反馈', (tester) async {
+    await tester.runAsync(() async {
+      state = await loggedInState(server);
+      await state.sendText('临时内容');
+      await state.sendText('固定内容');
+      final pinned = state.items.firstWhere((item) => item.text == '固定内容');
+      await state.setPinned(pinned.id, true);
+      server.clearTempDelay = const Duration(milliseconds: 200);
+      await pumpShell(tester, state, bridge: bridge);
+      await openSettings(tester);
+      await scrollToKey(tester, const Key('clearTempButton'));
+      await tester.tap(find.byKey(const Key('clearTempButton')));
+      await tester.pump();
+      expect(find.textContaining('只删除未固定内容'), findsWidgets);
+      await tester.tap(find.byKey(const Key('clearTempConfirm1')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('clearTempConfirm2')));
+      await tester.pump();
+      expect(find.text('清理中'), findsOneWidget);
+      await waitUntil(tester, () =>
+          state.clearTempStatus == OpStatus.success &&
+          state.items.every((item) => item.pinned));
+      expect(server.itemsById.values.map((item) => item['text']),
+          contains('固定内容'));
+      expect(server.itemsById.values.map((item) => item['text']),
+          isNot(contains('临时内容')));
+      expect(find.textContaining('已清理'), findsOneWidget);
+    });
+  });
+
+  testWidgets('清理临时内容失败显示服务端错误且不误报成功', (tester) async {
+    await tester.runAsync(() async {
+      state = await loggedInState(server);
+      await state.sendText('保留内容');
+      server.forceClearTempStatus = 500;
+      server.forceClearTempMessage = '临时内容清理失败';
+      await pumpShell(tester, state, bridge: bridge);
+      await openSettings(tester);
+      await scrollToKey(tester, const Key('clearTempButton'));
+      await tester.tap(find.byKey(const Key('clearTempButton')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('clearTempConfirm1')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('clearTempConfirm2')));
+      await waitUntil(tester, () => state.clearTempStatus == OpStatus.error);
+      expect(find.text('临时内容清理失败'), findsOneWidget);
+      expect(server.itemsById.values.map((item) => item['text']),
+          contains('保留内容'));
     });
   });
 }

@@ -54,6 +54,11 @@ class CopySyncBridge(private val activity: Activity) : MethodChannel.MethodCallH
         private const val RECEIVED_FILE_PREFIX = "received_file_"
         private const val PENDING_DOWNLOAD_PREFIX = "pending_download_"
         private const val UPDATE_APK_NAME = "copysync-update.apk"
+        private const val PICKER_REQUEST_CODE = 24027
+        private const val PICKER_TOO_LARGE_MESSAGE = "文件超过 100MB 上限，无法上传"
+        internal const val MAX_PICKER_BYTES = 100L * 1024L * 1024L
+        internal fun pickerSizeAllowed(size: Long): Boolean =
+            size < 0L || size <= MAX_PICKER_BYTES
         private val FILE_MANAGER_PACKAGES = arrayOf(
             "com.sec.android.app.myfiles",
             "com.google.android.apps.nbu.files",
@@ -63,6 +68,7 @@ class CopySyncBridge(private val activity: Activity) : MethodChannel.MethodCallH
 
     private val context: Context get() = activity.applicationContext
     private var channel: MethodChannel? = null
+    private var pickerResult: MethodChannel.Result? = null
     private val io = Executors.newCachedThreadPool()
 
     /// 待确认分享（内存态；进程被杀时分享 intent 会随启动重新投递）。
@@ -185,10 +191,11 @@ class CopySyncBridge(private val activity: Activity) : MethodChannel.MethodCallH
                 "notify.show" -> notifyShow(call, result)
                 "share.pending" -> result.success(sharePending())
                 "share.confirm" -> shareConfirm(call, result)
+                "picker.openFile" -> openPicker(call, result)
                 "download.enqueue" -> downloadEnqueue(call, result)
                 "download.reconcile" -> io.execute { result.success(downloadReconcile()) }
-                "files.saveSent" -> io.execute { saveFile(call, result, sent = true) }
-                "files.saveReceived" -> io.execute { saveFile(call, result, sent = false) }
+                "files.saveSent" -> io.execute { saveSentFile(call, result) }
+                "files.saveReceived" -> io.execute { saveFile(call, result) }
                 "files.revealReceived" -> revealReceived(call, result)
                 "files.openReceived" -> openReceived(call, result)
                 "update.check" -> io.execute { updateCheck(call, result) }
@@ -377,6 +384,113 @@ class CopySyncBridge(private val activity: Activity) : MethodChannel.MethodCallH
         result.success(null)
     }
 
+    // ------------------------------------------------------------------ picker
+
+    /// 通过 Android SAF 选择文件；结果只包含应用缓存路径和元数据。
+    private fun openPicker(call: MethodCall, result: MethodChannel.Result) {
+        if (pickerResult != null) {
+            result.error("not_ready", "文件选择器仍在工作", null)
+            return
+        }
+        val imagesOnly = call.argument<Boolean>("imagesOnly") == true
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType(if (imagesOnly) "image/*" else "*/*")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        pickerResult = result
+        try {
+            activity.startActivityForResult(intent, PICKER_REQUEST_CODE)
+        } catch (error: RuntimeException) {
+            pickerResult = null
+            result.error("system_error", error.message ?: "无法打开文件选择器", null)
+        }
+    }
+
+    /// Activity 回调中只在原生侧流式复制文件，避免 FileResponse.bytes 的
+    /// 全量 MethodChannel 解码。
+    fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != PICKER_REQUEST_CODE) return false
+        val callback = pickerResult ?: return true
+        pickerResult = null
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            callback.success(null)
+            return true
+        }
+        io.execute {
+            try {
+                val picked = copyPickedFile(uri)
+                activity.runOnUiThread { callback.success(picked) }
+            } catch (error: PickerTooLargeException) {
+                activity.runOnUiThread {
+                    callback.error("file_too_large", PICKER_TOO_LARGE_MESSAGE, null)
+                }
+            } catch (error: Exception) {
+                Log.e(TAG, "picker.openFile failed", error)
+                activity.runOnUiThread {
+                    callback.error("system_error", error.message ?: "无法读取所选文件", null)
+                }
+            }
+        }
+        return true
+    }
+
+    private fun copyPickedFile(uri: Uri): Map<String, Any?> {
+        val name = safeReceiveName(displayName(uri))
+        val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+        val dir = File(context.cacheDir, "picker/" + UUID.randomUUID().toString())
+        dir.mkdirs()
+        val target = File(dir, name)
+        try {
+            val knownSize = sourceSize(uri)
+            if (knownSize != null && !pickerSizeAllowed(knownSize)) {
+                throw PickerTooLargeException()
+            }
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var copied = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        if (count == 0) continue
+                        if (count.toLong() > MAX_PICKER_BYTES - copied) {
+                            throw PickerTooLargeException()
+                        }
+                        output.write(buffer, 0, count)
+                        copied += count
+                    }
+                }
+            } ?: throw IllegalStateException("无法读取 $name")
+            return mapOf(
+                "path" to target.absolutePath,
+                "name" to name,
+                "mime" to mime,
+                "size" to target.length(),
+            )
+        } catch (error: Exception) {
+            target.delete()
+            dir.deleteRecursively()
+            throw error
+        }
+    }
+
+    private fun sourceSize(uri: Uri): Long? {
+        return try {
+            context.contentResolver.query(
+                uri, arrayOf(OpenableColumns.SIZE), null, null, null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst() || cursor.isNull(0)) null
+                else cursor.getLong(0).takeIf { it >= 0L }
+            }
+        } catch (error: Exception) {
+            Log.w(TAG, "picker size lookup failed", error)
+            null
+        }
+    }
+
+    private class PickerTooLargeException : Exception()
+
     // --------------------------------------------------------------- download
 
     private fun downloadEnqueue(call: MethodCall, result: MethodChannel.Result) {
@@ -533,15 +647,42 @@ class CopySyncBridge(private val activity: Activity) : MethodChannel.MethodCallH
 
     // ------------------------------------------------------------------ files
 
-    /// 落盘 Download/CopySync（旧工程唯一接收目录），重名自动追加时间戳，
-    /// 记录 received_file_<id> 映射，返回最终文件名。
-    private fun saveFile(call: MethodCall, result: MethodChannel.Result, sent: Boolean) {
+    /// 已发送文件从应用缓存路径流式落盘 Download/CopySync，重名自动追加时间戳。
+    private fun saveSentFile(call: MethodCall, result: MethodChannel.Result) {
         try {
-            val recordId = if (sent) {
-                "sent:" + (call.argument<String>("itemId") ?: "")
-            } else {
-                call.argument<String>("deliveryId") ?: ""
+            val itemId = call.argument<String>("itemId")
+            val name = call.argument<String>("name")
+            val path = call.argument<String>("path")
+            if (itemId.isNullOrBlank() || name.isNullOrBlank() || path.isNullOrBlank()) {
+                result.error("invalid_args", "saveSent 需要 itemId/name/path", null)
+                return
             }
+            val source = File(path).canonicalFile
+            val cacheRoot = context.cacheDir.canonicalFile
+            if (!source.isFile ||
+                !source.path.startsWith(cacheRoot.path + File.separator)
+            ) {
+                result.error("not_found", "待保存文件不存在", null)
+                return
+            }
+            val finalName = uniqueReceiveName(name)
+            if (!copyToReceiveDir(finalName, source)) {
+                result.error("system_error", "文件写入 Download/$RECEIVE_DIRECTORY 失败", null)
+                return
+            }
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(RECEIVED_FILE_PREFIX + "sent:" + itemId, finalName).apply()
+            result.success(finalName)
+        } catch (error: Exception) {
+            Log.e(TAG, "save sent file failed", error)
+            result.error("system_error", error.message ?: "文件写入失败", null)
+        }
+    }
+
+    /// 接收文件的旧 bytes 接口保留；已发送文件不再经过 Base64。
+    private fun saveFile(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val recordId = call.argument<String>("deliveryId") ?: ""
             val name = call.argument<String>("name")
             val data = call.argument<String>("dataBase64")
             if (name.isNullOrBlank() || data == null) {
@@ -595,6 +736,48 @@ class CopySyncBridge(private val activity: Activity) : MethodChannel.MethodCallH
                 Log.e(TAG, "legacy write failed", error)
                 false
             }
+        }
+    }
+
+    private fun copyToReceiveDir(name: String, source: File): Boolean {
+        return try {
+            source.inputStream().use { input ->
+                if (Build.VERSION.SDK_INT >= 29) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                        put(MediaStore.MediaColumns.MIME_TYPE, guessMime(name))
+                        put(MediaStore.MediaColumns.RELATIVE_PATH,
+                            Environment.DIRECTORY_DOWNLOADS + "/" + RECEIVE_DIRECTORY)
+                    }
+                    val uri = context.contentResolver.insert(
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+                    try {
+                        val output = context.contentResolver.openOutputStream(uri)
+                            ?: throw IllegalStateException("无法打开目标文件")
+                        output.use { input.copyTo(it, 64 * 1024) }
+                        true
+                    } catch (error: Exception) {
+                        context.contentResolver.delete(uri, null, null)
+                        throw error
+                    }
+                } else {
+                    val dir = File(
+                        Environment.getExternalStoragePublicDirectory(
+                            Environment.DIRECTORY_DOWNLOADS), RECEIVE_DIRECTORY)
+                    dir.mkdirs()
+                    val target = File(dir, name)
+                    try {
+                        target.outputStream().use { input.copyTo(it, 64 * 1024) }
+                        true
+                    } catch (error: Exception) {
+                        target.delete()
+                        throw error
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            Log.e(TAG, "stream sent file failed", error)
+            false
         }
     }
 
@@ -755,20 +938,11 @@ class CopySyncBridge(private val activity: Activity) : MethodChannel.MethodCallH
         return guessMime(name)
     }
 
-    private fun safeReceiveName(originalName: String): String {
-        var name = File(originalName).name.trim()
-        name = name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_")
-        return name.ifEmpty { "CopySync-file" }
-    }
+    private fun safeReceiveName(originalName: String): String =
+        ReceiveNaming.safeName(originalName)
 
-    private fun uniqueReceiveName(originalName: String): String {
-        val name = safeReceiveName(originalName)
-        if (!receivedFileExists(name)) return name
-        val dot = name.lastIndexOf('.')
-        val extension = if (dot > 0) name.substring(dot) else ""
-        val base = if (extension.isEmpty()) name else name.substring(0, name.length - extension.length)
-        return base + "-" + System.currentTimeMillis() + extension
-    }
+    private fun uniqueReceiveName(originalName: String): String =
+        ReceiveNaming.uniqueName(originalName, ::receivedFileExists)
 
     // ----------------------------------------------------------------- update
 

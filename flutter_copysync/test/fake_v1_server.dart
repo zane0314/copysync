@@ -44,6 +44,24 @@ class FakeV1Server {
   /// POST /api/v1/items 的响应延迟（loading 态防重测试用）。
   Duration itemDelay = Duration.zero;
 
+  /// PATCH /api/v1/items/{id} 的响应延迟（备注 loading 态测试用）。
+  Duration patchDelay = Duration.zero;
+
+  /// PATCH /api/v1/items/{id} 的故障注入。
+  int? forcePatchStatus;
+  String forcePatchCode = 'server_error';
+  String forcePatchMessage = '备注保存失败';
+
+  /// POST /api/v1/items/clear-temp 的响应延迟与故障注入。
+  Duration clearTempDelay = Duration.zero;
+  int? forceClearTempStatus;
+  String forceClearTempCode = 'server_error';
+  String forceClearTempMessage = '清理失败';
+
+  /// 前 N 次 clear-temp 在发送响应头前销毁底层连接，模拟传输层瞬时中断
+  /// （对应 Android 偶发的 header 前 HttpException）；用于验证幂等重试。
+  int clearTempTransportFailures = 0;
+
   /// 非 null 时，POST /api/v1/items 一律以该状态码失败。
   int? forceItemStatus;
 
@@ -53,6 +71,11 @@ class FakeV1Server {
 
   /// true 时，cursor>0 的 sync 返回 409 full_sync_required。
   bool rejectIncrementalSync = false;
+
+  /// SSE 测试控制：关闭前 N 个连接，其余连接保持打开。
+  int eventsToCloseAfterInitial = 0;
+  int eventConnectionCount = 0;
+  final List<HttpResponse> _eventResponses = [];
 
   Future<String> start() async {
     _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -85,6 +108,25 @@ class FakeV1Server {
       'op': op,
       'created_at': '2026-08-25T00:00:00Z',
     });
+  }
+
+  /// 模拟另一个客户端写入一条内容，不经过当前测试客户端请求。
+  void addExternalText(String text) {
+    final item = _newItem(text, null);
+    itemsById[item['id'] as String] = item;
+    recordChange('item', item['id'] as String, 'upsert');
+  }
+
+  /// 向当前 SSE 连接推送一次 sync 事件。
+  Future<void> emitEvent() async {
+    for (final response in List<HttpResponse>.of(_eventResponses)) {
+      try {
+        response.write('event: sync\ndata: $_seq\n\n');
+        await response.close();
+      } on Object {
+        _eventResponses.remove(response);
+      }
+    }
   }
 
   String _tokenOf(HttpRequest req) =>
@@ -243,6 +285,30 @@ class FakeV1Server {
     if (_tokenOf(req) != 'cps_tok_1') {
       return _fail(req.response, 401, 'unauthorized', '未认证');
     }
+    if (path == '/api/v1/events' && req.method == 'GET') {
+      eventConnectionCount += 1;
+      final response = req.response;
+      response.statusCode = 200;
+      response.headers.contentType = ContentType('text', 'event-stream',
+          charset: 'utf-8');
+      response.headers.set('cache-control', 'no-cache');
+      response.headers.set('x-accel-buffering', 'no');
+      final closeAfterInitial = eventsToCloseAfterInitial > 0;
+      if (closeAfterInitial) eventsToCloseAfterInitial -= 1;
+      response.write('retry: 2000\nevent: sync\ndata: $_seq\n\n');
+      await response.flush();
+      if (closeAfterInitial) {
+        await response.close();
+        return;
+      }
+      _eventResponses.add(response);
+      try {
+        await response.done;
+      } finally {
+        _eventResponses.remove(response);
+      }
+      return;
+    }
     if (path == '/api/v1/devices') {
       return _json(req.response, {
         'devices': devices
@@ -330,6 +396,11 @@ class FakeV1Server {
       return _json(req.response, {'item': item});
     }
     if (itemMatch != null && req.method == 'PATCH') {
+      if (patchDelay > Duration.zero) await Future<void>.delayed(patchDelay);
+      if (forcePatchStatus != null) {
+        return _fail(req.response, forcePatchStatus!, forcePatchCode,
+            forcePatchMessage);
+      }
       final item = itemsById[itemMatch.group(1)];
       if (item == null) {
         return _fail(req.response, 404, 'item_not_found', '项目不存在');
@@ -427,6 +498,33 @@ class FakeV1Server {
       }
       password = next;
       return _json(req.response, {'ok': true});
+    }
+    if (path == '/api/v1/items/clear-temp' && req.method == 'POST') {
+      if (clearTempTransportFailures > 0) {
+        clearTempTransportFailures -= 1;
+        // 请求体已在 _handle 顶部读净；不发送响应，直接销毁底层连接
+        // → 客户端在收到响应头前抛 HttpException。
+        (await req.response.detachSocket()).destroy();
+        return;
+      }
+      if (clearTempDelay > Duration.zero) {
+        await Future<void>.delayed(clearTempDelay);
+      }
+      if (forceClearTempStatus != null) {
+        return _fail(req.response, forceClearTempStatus!, forceClearTempCode,
+            forceClearTempMessage);
+      }
+      final ids = itemsById.entries
+          .where((entry) => entry.value['pinned'] != 1)
+          .map((entry) => entry.key)
+          .toList();
+      for (final id in ids) {
+        recordChange('item', id, 'delete');
+        itemsById.remove(id);
+        blobsById.remove(id);
+      }
+      return _json(
+          req.response, {'ok': true, 'deleted': ids.length, 'bytes': 0});
     }
     if (path == '/api/v1/items/clear-all' && req.method == 'POST') {
       final ids = itemsById.keys.toList();

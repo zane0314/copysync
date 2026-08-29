@@ -9,6 +9,11 @@ abstract class TokenStore {
   /// 当前设备 id（方向判断等用；与 token 同生命周期）。
   Future<String?> readDeviceId();
   Future<void> saveDeviceId(String deviceId);
+
+  /// 服务端基址（登录成功时保存，重启后恢复；与 token 解耦——登出后仍保留，
+  /// 便于下次登录预填、并避免恢复会话时回退到仅供模拟器用的默认地址）。
+  Future<String?> readBaseUrl();
+  Future<void> saveBaseUrl(String baseUrl);
 }
 
 /// 生产实现：iOS Keychain / Android Keystore / macOS Keychain。
@@ -21,6 +26,7 @@ class SecureTokenStore implements TokenStore {
   );
   static const _key = 'copysync_v1_token';
   static const _deviceKey = 'copysync_v1_device_id';
+  static const _baseUrlKey = 'copysync_v1_base_url';
 
   @override
   Future<String?> read() => _storage.read(key: _key);
@@ -32,6 +38,7 @@ class SecureTokenStore implements TokenStore {
   Future<void> clear() async {
     await _storage.delete(key: _key);
     await _storage.delete(key: _deviceKey);
+    // baseUrl 有意保留：登出不应丢失服务端地址。
   }
 
   @override
@@ -40,4 +47,11 @@ class SecureTokenStore implements TokenStore {
   @override
   Future<void> saveDeviceId(String deviceId) =>
       _storage.write(key: _deviceKey, value: deviceId);
+
+  @override
+  Future<String?> readBaseUrl() => _storage.read(key: _baseUrlKey);
+
+  @override
+  Future<void> saveBaseUrl(String baseUrl) =>
+      _storage.write(key: _baseUrlKey, value: baseUrl);
 }

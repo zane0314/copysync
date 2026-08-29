@@ -17,10 +17,13 @@ class FakeAndroidHost implements AndroidHost {
   List<AndroidSharePayload> pendingShares = [];
   final List<Map<String, Object?>> enqueued = [];
   final List<Map<String, Object?>> savedSent = [];
+  final List<Map<String, Object?>> savedSentPaths = [];
   final List<Map<String, Object?>> openedReceived = [];
   String? lastClipboardText;
   List<AndroidDownloadRecord> reconcileResult = [];
   bool failEnqueue = false;
+  AndroidPickedFile? pickedFile;
+  Completer<BridgeResult<String>>? saveSentCompleter;
 
   void emit(String name, [Object? arguments]) {
     if (!_events.isClosed) _events.add(BridgeEvent(name, arguments));
@@ -32,8 +35,11 @@ class FakeAndroidHost implements AndroidHost {
   Stream<BridgeEvent> get events => _events.stream;
 
   @override
-  Future<BridgeResult<void>> clipboardWrite(
-      {String? text, Uint8List? png, bool ignoreNext = false}) async {
+  Future<BridgeResult<void>> clipboardWrite({
+    String? text,
+    Uint8List? png,
+    bool ignoreNext = false,
+  }) async {
     lastClipboardText = text;
     return const BridgeResult.success(null);
   }
@@ -51,8 +57,11 @@ class FakeAndroidHost implements AndroidHost {
   }
 
   @override
-  Future<BridgeResult<void>> notifyShow(
-      {required String title, required String body, String? id}) async {
+  Future<BridgeResult<void>> notifyShow({
+    required String title,
+    required String body,
+    String? id,
+  }) async {
     notifications.add('$title|$body|$id');
     return const BridgeResult.success(null);
   }
@@ -69,6 +78,13 @@ class FakeAndroidHost implements AndroidHost {
   }
 
   @override
+  Future<BridgeResult<AndroidPickedFile?>> pickFile({
+    bool imagesOnly = false,
+  }) async {
+    return BridgeResult.success(pickedFile);
+  }
+
+  @override
   Future<BridgeResult<int>> downloadEnqueue({
     required String url,
     required String deliveryId,
@@ -78,7 +94,9 @@ class FakeAndroidHost implements AndroidHost {
   }) async {
     if (failEnqueue) {
       return const BridgeResult.failure(
-          errorCode: 'system_error', errorMessage: '下载服务不可用');
+        errorCode: 'system_error',
+        errorMessage: '下载服务不可用',
+      );
     }
     enqueued.add({
       'url': url,
@@ -95,19 +113,24 @@ class FakeAndroidHost implements AndroidHost {
       BridgeResult.success(reconcileResult);
 
   @override
-  Future<BridgeResult<String>> filesSaveSent(
-      {required String itemId,
-      required String name,
-      required Uint8List data}) async {
-    savedSent.add({'itemId': itemId, 'name': name, 'size': data.length});
-    return BridgeResult.success('sent:$name');
+  Future<BridgeResult<String>> filesSaveSent({
+    required String itemId,
+    required String name,
+    required String path,
+  }) async {
+    final record = {'itemId': itemId, 'name': name, 'path': path};
+    savedSent.add(record);
+    savedSentPaths.add(record);
+    return saveSentCompleter?.future ?? BridgeResult.success('sent:$name');
   }
 
   @override
-  Future<BridgeResult<void>> filesOpenReceived(
-      {String? deliveryId, required String name, required String mime}) async {
-    openedReceived.add(
-        {'deliveryId': deliveryId, 'name': name, 'mime': mime});
+  Future<BridgeResult<void>> filesOpenReceived({
+    String? deliveryId,
+    required String name,
+    required String mime,
+  }) async {
+    openedReceived.add({'deliveryId': deliveryId, 'name': name, 'mime': mime});
     return const BridgeResult.success(null);
   }
 }
